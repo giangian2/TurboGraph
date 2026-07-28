@@ -1,39 +1,53 @@
 /*
- * Out Starts graph reperesentation
+ * Forward/backward star (CSR) in un blocco contiguo unico.
  *
- * g->data is an array of n Stars, each star is an array of outgoing edges.
- * 
+ * g->data punta a un solo malloc che contiene, in quest'ordine: l'header
+ * Star, poi i segmenti dati. Gli archi uscenti di u sono l'intervallo
+ * [heads[u], heads[u+1]) di to[]/w[]: contigui, quindi out_degree e'
+ * O(1) e iterare i vicini e' scorrere un array. Immutabile.
  *
- * This i snot dynamic and allows iter_out in O(1) ...perfect for BFS
+ * La out star c'e' sempre. La in star (rheads/from/rw) serve solo ai
+ * grafi diretti: in un grafo non diretto la out star contiene gia'
+ * entrambi i versi di ogni arco, quindi iter_in delega a iter_out.
+ *
+ * POSITION INDEPENDENT: l'header non contiene puntatori ma offset in byte
+ * relativi all'inizio del blocco. Il blocco resta quindi valido a
+ * qualunque indirizzo venga copiato -- memoria device, file mappato,
+ * socket -- perche' non c'e' niente da rilocare. Un puntatore host
+ * copiato su GPU sarebbe spazzatura; un offset no. Vedi
+ * graph_star_layout() in Graph.h per il caricamento.
  */
 #include <stdlib.h>
 #include "../include/Graph.h"
 
 
 /*
- * Mappa del blocco unico: nessun campo qui contiene dati, sono tutti
- * puntatori dentro la stessa allocazione a cui punta g->data.
- *
- * La out star c'e' sempre. La in star (rheads/from/rw) serve solo ai
- * grafi diretti: in un grafo non diretto la out star contiene gia'
- * entrambi i versi di ogni arco, quindi i tre campi restano NULL e
- * iter_in delega a iter_out.
+ * Mappa del blocco. Offset in byte da qui, non puntatori.
+ * 0 = segmento assente: nessun segmento puo' partire a 0, li' c'e' l'header.
  */
 typedef struct
 {
+    size_t bytes;       //dimensione totale del blocco: quanto copiare
+    size_t n_arcs;      //archi fisici = lunghezza di to/w (e di from/rw)
     //OUT
-    int *heads;
-    int *to;
-    //IN (NULL se il grafo non e' diretto)
-    int *rheads;
-    int *from;
-    //WEIGHTS (rw NULL se il grafo non e' diretto)
-    double *w;
-    double *rw;
-    //TOTAL ARCS (IN CASE IT IS NOT DIRECTED)
-    size_t n_arcs;
+    size_t o_heads;
+    size_t o_to;
+    size_t o_w;
+    //IN (0 se il grafo non e' diretto)
+    size_t o_rheads;
+    size_t o_from;
+    size_t o_rw;
 
 } Star;
+
+/* Da offset a puntatore. Una addizione, che accanto all'accesso in
+ * memoria che segue non e' misurabile. */
+static inline int    *st_heads (const Star *s) { return (int*)   ((char*)s + s->o_heads); }
+static inline int    *st_to    (const Star *s) { return (int*)   ((char*)s + s->o_to);    }
+static inline double *st_w     (const Star *s) { return (double*)((char*)s + s->o_w);     }
+static inline int    *st_rheads(const Star *s) { return (int*)   ((char*)s + s->o_rheads); }
+static inline int    *st_from  (const Star *s) { return (int*)   ((char*)s + s->o_from);  }
+static inline double *st_rw    (const Star *s) { return (double*)((char*)s + s->o_rw);    }
 
 
 static const GraphOps star_ops = {
@@ -80,8 +94,10 @@ static size_t arc_count(const Graph *g, const GraphEdge *e, size_t m)
  */
 static void fill_out(const Graph *g, Star *s, const GraphEdge *edges, size_t m)
 {
-    const int n = g->n;
-    int *head = s->heads;
+    const int n    = g->n;
+    int    *head   = st_heads(s);
+    int    *to     = st_to(s);
+    double *w      = st_w(s);
 
     /* 1. gradi, sfasati di uno: head[x+1] = grado di x */
     for (size_t k = 0; k < m; k++) {
@@ -99,12 +115,12 @@ static void fill_out(const Graph *g, Star *s, const GraphEdge *edges, size_t m)
         int u = edges[k].u;
         int v = edges[k].v;
         int p = head[u]++;
-        s->to[p] = v;
-        s->w[p]  = edges[k].w;
+        to[p] = v;
+        w[p]  = edges[k].w;
         if (!g->directed && u != v) {
             p = head[v]++;
-            s->to[p] = u;
-            s->w[p]  = edges[k].w;
+            to[p] = u;
+            w[p]  = edges[k].w;
         }
     }
 
@@ -121,8 +137,10 @@ static void fill_out(const Graph *g, Star *s, const GraphEdge *edges, size_t m)
  */
 static void fill_in(const Graph *g, Star *s, const GraphEdge *edges, size_t m)
 {
-    const int n = g->n;
-    int *head = s->rheads;
+    const int n    = g->n;
+    int    *head   = st_rheads(s);
+    int    *from   = st_from(s);
+    double *rw     = st_rw(s);
 
     for (size_t k = 0; k < m; k++)
         head[edges[k].v + 1]++;
@@ -132,8 +150,8 @@ static void fill_in(const Graph *g, Star *s, const GraphEdge *edges, size_t m)
 
     for (size_t k = 0; k < m; k++) {
         int p = head[edges[k].v]++;
-        s->from[p] = edges[k].u;
-        s->rw[p]   = edges[k].w;
+        from[p] = edges[k].u;
+        rw[p]   = edges[k].w;
     }
 
     for (int x = n; x >= 1; x--)
@@ -181,15 +199,18 @@ int star_init_from_edges(Graph *g, const GraphEdge *edges, size_t m){
     if (!blk)
         return GRAPH_ERR_ALLOC;
 
-    Star *s   = (Star*)blk;
-    s->w      = (double*)(blk + o_w);
-    s->heads  = (int*)   (blk + o_heads);
-    s->to     = (int*)   (blk + o_to);
-    //non diretto: nessun segmento allocato, il NULL fa anche da flag
-    s->rw     = back ? (double*)(blk + o_rw)     : NULL;
-    s->rheads = back ? (int*)   (blk + o_rheads) : NULL;
-    s->from   = back ? (int*)   (blk + o_from)   : NULL;
-    s->n_arcs = tot_arcs;
+    //Header: offset, non puntatori. Nessun indirizzo assoluto nel blocco,
+    //quindi copiarlo altrove (device, file, rete) non richiede rilocazione.
+    //I tre offset della in star restano a 0 = assente se non e' diretto.
+    Star *s     = (Star*)blk;
+    s->bytes    = off;
+    s->n_arcs   = tot_arcs;
+    s->o_w      = o_w;
+    s->o_heads  = o_heads;
+    s->o_to     = o_to;
+    s->o_rw     = o_rw;
+    s->o_rheads = o_rheads;
+    s->o_from   = o_from;
 
     fill_out(g, s, edges, m);
     if (back)
