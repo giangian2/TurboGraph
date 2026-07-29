@@ -1,4 +1,5 @@
-# graphs/core
+![Logo del progetto](./res/TurboGraph_logo.svg)
+# TurboGraph
 
 A high-performance graph engine written in C, built to be the foundation for
 LLM memory systems and, later, large-scale code intelligence — with CUDA
