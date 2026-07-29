@@ -80,7 +80,7 @@ Graph *graph_from_edges(int n, bool directed,
     }
 
     if (repr == GRAPH_STAR) {
-        /*
+        
         Graph *g = shell(n, directed, repr);
         if (!g)
             return NULL;
@@ -88,7 +88,7 @@ Graph *graph_from_edges(int n, bool directed,
             free(g);
             return NULL;
         }
-        return g;*/
+        return g;
     }
 
     Graph *g = graph_create(n, directed, repr);

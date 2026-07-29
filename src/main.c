@@ -46,7 +46,7 @@ int main(void)
      * ritorna un Graph* qualunque come graph_from_edges(), quindi tutto
      * il resto dell'API (BFS, export, ...) non cambia.
      */
-    Graph *roads = graph_import_dot("twitch.dot", GRAPH_LIST);
+    Graph *roads = graph_import_dot("twitch.dot", GRAPH_STAR);
     if (!roads) {
         fprintf(stderr, "import di twitch.dot fallito\n");
         return 1;

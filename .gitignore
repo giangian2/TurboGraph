@@ -1,0 +1,30 @@
+# --- build output -------------------------------------------------------
+/bin/
+/build/
+*.o
+*.a
+*.so
+*.d
+
+# --- debugging / profiling ----------------------------------------------
+*.dSYM/
+core
+vgcore.*
+callgrind.out.*
+perf.data*
+
+# --- generated graph exports --------------------------------------------
+# The DOT files read by graph_import_dot() are inputs and stay tracked
+# (twitch.dot, europe_roads.dot). Everything written by graph_export_dot()
+# or by `dot -T...` is regenerable output.
+bfs.dot
+*_bfs.dot
+*.svg
+*.png
+
+# --- editors / OS -------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
