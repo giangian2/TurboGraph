@@ -8,9 +8,9 @@
 #include "../include/Queue.h"
 
 /**
- * @param g Grafo
- * @param v Vertice
- * 
+ * @param g Graph
+ * @param v Vertex
+ *
  * @return True if the vertex can exists into the graph g with n edges, False otherwise
  */
 static bool vertex_ok(const Graph *g, int v)
@@ -177,9 +177,9 @@ bool graph_iter_next(GraphIter *it, int *v, double *w)
 
 
 /*
- * Alloca un Traversal per un grafo di n vertici, con tutti i vertici
- * marcati "non raggiunto" (parent = -1, dist = -1), come richiede il
- * contratto in Graph.h. Ritorna NULL se un'allocazione fallisce.
+ * Allocates a Traversal for a graph of n vertices, with all vertices
+ * marked "unreached" (parent = -1, dist = -1), as required by the
+ * contract in Graph.h. Returns NULL if an allocation fails.
  */
 static Traversal *traversal_new(int n)
 {
@@ -192,7 +192,7 @@ static Traversal *traversal_new(int n)
     t->count  = 0;
     t->n      = n;
     if (!t->order || !t->parent || !t->dist) {
-        traversal_free(t);   /* free(NULL) è legale: libera solo il riuscito */
+        traversal_free(t);   /* free(NULL) is legal: only frees what actually succeeded */
         return NULL;
     }
     for (int v = 0; v < n; v++) {
@@ -211,35 +211,35 @@ Traversal *graph_bfs(const Graph *g, int source)
     if (!t)
         return NULL;
 
-    /* Capacita' g->n: per l'invariante sopra la coda non puo' riempirsi,
-     * quindi gli enqueue sotto non possono fallire. */
+    /* Capacity g->n: given the invariant above, the queue can never fill
+     * up, so the enqueues below can never fail. */
     Queue *q = queue_create(g->n, sizeof(int));
     if (!q) {
         traversal_free(t);
         return NULL;
     }
 
-    /* La sorgente e' il punto di partenza: distanza 0 da se stessa,
-     * nessun padre (resta -1), primo vertice nell'ordine di visita. */
+    /* The source is the starting point: distance 0 from itself,
+     * no parent (stays -1), first vertex in the visit order. */
     t->dist[source] = 0;
     t->order[t->count++] = source;
     queue_enqueue(q, &source);
 
-    /* Finche' c'e' un vertice scoperto ma non ancora processato... */
+    /* While there is a discovered but not-yet-processed vertex... */
     int u;
     while (queue_dequeue(q, &u)) {
-        /* Scorri i vicini uscenti di u (il vertice appena estratto,
-         * NON la sorgente). L'iteratore vive sullo stack: nessun malloc. */
+        /* Iterate the outgoing neighbors of u (the vertex just dequeued,
+         * NOT the source). The iterator lives on the stack: no malloc. */
         GraphIter it;
         g->ops->iter_out(g, u, &it);
 
         int v;
-        while (g->ops->iter_next(&it, &v, NULL)) {   /* peso ignorato */
+        while (g->ops->iter_next(&it, &v, NULL)) {   /* weight ignored */
             if (t->dist[v] != -1)
-                continue;   /* gia' scoperto da un cammino non piu' lungo */
+                continue;   /* already discovered via an equal-or-shorter path */
 
-            /* Prima scoperta di v: u e' il suo padre nell'albero BFS e
-             * la sua distanza e' un arco in piu' di quella di u. */
+            /* First discovery of v: u is its parent in the BFS tree and
+             * its distance is one edge more than u's. */
             t->dist[v]   = t->dist[u] + 1;
             t->parent[v] = u;
             t->order[t->count++] = v;
@@ -247,15 +247,25 @@ Traversal *graph_bfs(const Graph *g, int source)
         }
     }
 
-    /* Coda vuota: nessun vertice raggiungibile resta da esplorare.
-     * I vertici mai scoperti restano a parent == -1, dist == -1. */
+    /* Empty queue: no reachable vertex is left to explore.
+     * Vertices that were never discovered stay at parent == -1, dist == -1. */
     queue_free(q);
     return t;
 }
 
 
+/* Hoare-scheme partition (NOT Lomuto): the pivot value is edges[p].w and is
+ * never swapped out before scanning starts. e_minus/e_plus close in from
+ * both ends until they cross; the returned index is a SPLIT POINT, not the
+ * pivot's final sorted slot. edges[p..return] are all <= pivot and
+ * edges[return+1..q] are all >= pivot, but the element sitting at the
+ * returned index has no guarantee of already being in its final position
+ * and must still be included in further sorting (see QuickSort below).
+ * Safety note: the original pivot value always remains somewhere inside
+ * [p,q] and acts as a sentinel that halts both inner while-loops, so
+ * e_minus/e_plus can never scan past the p/q bounds. */
 int partition(GraphEdge* edges, int count, int p, int q){
-   
+
     //Handle edge cases
     if(p < 0 || q >=count){
         return -1;
@@ -295,8 +305,14 @@ void QuickSort(GraphEdge *edges,int count, int p,int q){
 
     int pivot_position = partition(edges, count, p , q);
 
+    /* Because partition() uses the Hoare scheme, pivot_position is only a
+     * split point, not the pivot's final index: the element at
+     * pivot_position is NOT guaranteed to be already sorted, so it must be
+     * included in the left recursive call (range [p, pivot_position]).
+     * Using [p, pivot_position-1] here would silently skip that element
+     * from both halves and leave the array unsorted. */
     QuickSort(edges, count, p, pivot_position);
-    
+
     QuickSort(edges, count, pivot_position+1, q);
 }
 
@@ -335,9 +351,9 @@ void traversal_free(Traversal *t)
 }
 
 /*
- * u->v (o u--v) e' un arco dell'albero di visita se v e' stato scoperto
- * passando da u, cioe' se parent[v] == u. In un grafo non diretto l'arco
- * viene emesso una volta sola, quindi va controllato in entrambi i versi.
+ * u->v (or u--v) is a tree edge of the traversal if v was discovered by
+ * going through u, i.e. if parent[v] == u. In an undirected graph the
+ * edge is emitted only once, so it must be checked in both directions.
  */
 static bool is_tree_edge(const Graph *g, const Traversal *t, int u, int v)
 {
@@ -355,14 +371,14 @@ int graph_export_dot(const Graph *g, const Traversal *t, const char *path)
     if (!f)
         return GRAPH_ERR_ARG;
 
-    /* DOT distingue grafi diretti (digraph, archi "->") e non (graph, "--") */
+    /* DOT distinguishes directed graphs (digraph, "->" edges) from undirected ones (graph, "--") */
     const char *edge_op = g->directed ? "->" : "--";
     fprintf(f, "%s G {\n", g->directed ? "digraph" : "graph");
     fprintf(f, "  rankdir=LR;\n");
     fprintf(f, "  node [shape=circle, style=filled, fillcolor=white];\n\n");
 
-    /* Nodi. Con un Traversal: sorgente arancione, raggiunti azzurri con la
-     * distanza in etichetta, non raggiunti lasciati bianchi e anonimi. */
+    /* Nodes. With a Traversal: source in orange, reached vertices in light
+     * blue with the distance as a label, unreached ones left white and unlabeled. */
     for (int v = 0; v < g->n; v++) {
         if (t && t->dist[v] >= 0)
             fprintf(f, "  %d [label=\"%d\\nd=%d\", fillcolor=%s];\n",
@@ -373,9 +389,9 @@ int graph_export_dot(const Graph *g, const Traversal *t, const char *path)
     }
     fprintf(f, "\n");
 
-    /* Archi, via iteratore: indipendente dalla rappresentazione. In un
-     * grafo non diretto ogni arco e' visto due volte (da entrambi gli
-     * estremi): lo emettiamo solo dal lato con indice minore. */
+    /* Edges, via the iterator: independent of the representation. In an
+     * undirected graph each edge is seen twice (from both endpoints):
+     * we emit it only from the side with the smaller index. */
     for (int u = 0; u < g->n; u++) {
         GraphIter it;
         g->ops->iter_out(g, u, &it);
