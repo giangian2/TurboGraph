@@ -37,6 +37,6 @@
  * Ritorna il grafo allocato in heap, oppure NULL se il file non si apre,
  * non contiene alcun arco/nodo valido, o l'allocazione fallisce.
  */
-Graph *graph_import_dot(const char *path, GraphRepr repr);
+Graph* graph_import_dot(const char* path, GraphRepr repr);
 
 #endif /* IMPORTER_H */

@@ -1,8 +1,8 @@
 #ifndef GRAPH_H
 #define GRAPH_H
 
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /*
  * A graph with n vertices numbered 0 .. n-1, directed or undirected,
@@ -20,24 +20,27 @@
  *                 built once via graph_from_edges() or graph_convert().
  */
 
-typedef enum {
+typedef enum
+{
     GRAPH_MATRIX,
     GRAPH_LIST,
     GRAPH_STAR
 } GraphRepr;
 
 /* Error codes returned by functions that return int. */
-typedef enum {
+typedef enum
+{
     GRAPH_OK            = 0,
-    GRAPH_ERR_ARG       = -1,   /* vertex out of range / invalid argument */
-    GRAPH_ERR_IMMUTABLE = -2,   /* mutation attempted on a star graph     */
-    GRAPH_ERR_ALLOC     = -3    /* out of memory                          */
+    GRAPH_ERR_ARG       = -1, /* vertex out of range / invalid argument */
+    GRAPH_ERR_IMMUTABLE = -2, /* mutation attempted on a star graph     */
+    GRAPH_ERR_ALLOC     = -3  /* out of memory                          */
 } ERROR_CODES;
 
 typedef struct Graph    Graph;
-typedef struct GraphOps GraphOps;   /* private vtable, see src/internal.h */
+typedef struct GraphOps GraphOps; /* private vtable, see src/internal.h */
 
-typedef struct {
+typedef struct
+{
     int    u, v;
     double w;
 } GraphEdge;
@@ -47,81 +50,80 @@ typedef struct {
  * cursor fields it needs. Obtain with graph_iter_out()/graph_iter_in(),
  * advance with graph_iter_next(). Do not mutate the graph while iterating.
  */
-typedef struct {
-    const Graph *g;
-    int    u;      /* vertex whose neighbors are being walked   */
-    int    i;      /* cursor: column (matrix) or index (star)   */
-    void  *node;   /* cursor: current chain node (list)         */
-    bool   in;     /* walking in-neighbors instead of out       */
+typedef struct
+{
+    const Graph* g;
+    int          u;    /* vertex whose neighbors are being walked   */
+    int          i;    /* cursor: column (matrix) or index (star)   */
+    void*        node; /* cursor: current chain node (list)         */
+    bool         in;   /* walking in-neighbors instead of out       */
 } GraphIter;
 
-struct GraphOps {
-    int    (*add_edge)(Graph *g, int u, int v, double w);
-    int    (*remove_edge)(Graph *g, int u, int v);
-    double (*get_weight)(const Graph *g, int u, int v);
-    int    (*out_degree)(const Graph *g, int u);
-    int    (*in_degree)(const Graph *g, int u);
-    void   (*iter_out)(const Graph *g, int u, GraphIter *it);
-    void   (*iter_in)(const Graph *g, int u, GraphIter *it);
-    bool   (*iter_next)(GraphIter *it, int *v, double *w);
-    void   (*destroy)(Graph *g);
+struct GraphOps
+{
+    int (*add_edge)(Graph* g, int u, int v, double w);
+    int (*remove_edge)(Graph* g, int u, int v);
+    double (*get_weight)(const Graph* g, int u, int v);
+    int (*out_degree)(const Graph* g, int u);
+    int (*in_degree)(const Graph* g, int u);
+    void (*iter_out)(const Graph* g, int u, GraphIter* it);
+    void (*iter_in)(const Graph* g, int u, GraphIter* it);
+    bool (*iter_next)(GraphIter* it, int* v, double* w);
+    void (*destroy)(Graph* g);
 };
 
-struct Graph {
-    int       n;          /* number of vertices                          */
-    size_t    m;          /* current number of (logical) edges           */
-    bool      directed;
-    GraphRepr repr;
-    const GraphOps *ops;  /* operations of this representation           */
-    void     *data;       /* representation-specific storage             */
+struct Graph
+{
+    int             n; /* number of vertices                          */
+    size_t          m; /* current number of (logical) edges           */
+    bool            directed;
+    GraphRepr       repr;
+    const GraphOps* ops;  /* operations of this representation           */
+    void*           data; /* representation-specific storage             */
 };
-
-
-
 
 /* Representation constructors: fill g->data and g->ops for an already
  * populated Graph shell (n, directed, repr set; m = 0). Return GRAPH_OK
  * or GRAPH_ERR_ALLOC. */
-int matrix_init(Graph *g);
-int list_init(Graph *g);
+int matrix_init(Graph* g);
+int list_init(Graph* g);
 
 /* Star graphs are built in one shot from a validated edge list. */
-int star_init_from_edges(Graph *g, const GraphEdge *edges, size_t m);
+int star_init_from_edges(Graph* g, const GraphEdge* edges, size_t m);
 
 /* ---- construction / destruction ---------------------------------------- */
 
 /* Empty graph. repr must be GRAPH_MATRIX or GRAPH_LIST (a star graph is
  * immutable, so an empty one would be useless): returns NULL for STAR. */
-Graph *graph_create(int n, bool directed, GraphRepr repr);
+Graph* graph_create(int n, bool directed, GraphRepr repr);
 
 /* Bulk build from an edge array (the only way to create a GRAPH_STAR
  * directly). Edges must be valid (vertices in range, weight != 0);
  * for STAR the array must not contain duplicate edges. */
-Graph *graph_from_edges(int n, bool directed,
-                        const GraphEdge *edges, size_t m, GraphRepr repr);
+Graph* graph_from_edges(int n, bool directed, const GraphEdge* edges, size_t m, GraphRepr repr);
 
-void graph_free(Graph *g);
+void graph_free(Graph* g);
 
 /* ---- edges ------------------------------------------------------------- */
 
 /* Adding an existing edge updates its weight (never duplicates).
  * Returns GRAPH_OK or an error code; GRAPH_ERR_IMMUTABLE on star graphs. */
-int    graph_add_edge(Graph *g, int u, int v, double w);
-int    graph_remove_edge(Graph *g, int u, int v);
+int graph_add_edge(Graph* g, int u, int v, double w);
+int graph_remove_edge(Graph* g, int u, int v);
 
-bool   graph_has_edge(const Graph *g, int u, int v);
-double graph_get_weight(const Graph *g, int u, int v);  /* 0.0 = absent */
+bool   graph_has_edge(const Graph* g, int u, int v);
+double graph_get_weight(const Graph* g, int u, int v); /* 0.0 = absent */
 
-int    graph_out_degree(const Graph *g, int u);   /* < 0 on error */
-int    graph_in_degree(const Graph *g, int u);
+int graph_out_degree(const Graph* g, int u); /* < 0 on error */
+int graph_in_degree(const Graph* g, int u);
 
 /* ---- neighbor iteration ------------------------------------------------ */
 
-int  graph_iter_out(const Graph *g, int u, GraphIter *it);
-int  graph_iter_in(const Graph *g, int u, GraphIter *it);
+int graph_iter_out(const Graph* g, int u, GraphIter* it);
+int graph_iter_in(const Graph* g, int u, GraphIter* it);
 /* Yields the next neighbor into *v (and its weight into *w, if non-NULL);
  * returns false when exhausted. */
-bool graph_iter_next(GraphIter *it, int *v, double *w);
+bool graph_iter_next(GraphIter* it, int* v, double* w);
 
 /* ---- traversals -------------------------------------------------------- */
 
@@ -134,22 +136,22 @@ bool graph_iter_next(GraphIter *it, int *v, double *w);
  *   dist    BFS: edge distance from the source
  *           DFS: depth in the DFS tree
  */
-typedef struct {
-    int *order;
-    int *parent;
-    int *dist;
-    int  count; //numero totale di vertici raggiunti
-    int  n;     //numero totale di vertific del grafo
+typedef struct
+{
+    int* order;
+    int* parent;
+    int* dist;
+    int  count; // numero totale di vertici raggiunti
+    int  n;     // numero totale di vertific del grafo
 } Traversal;
 
-Traversal *graph_bfs(const Graph *g, int source);
-Traversal *graph_dfs(const Graph *g, int source);
-void       traversal_free(Traversal *t);
+Traversal* graph_bfs(const Graph* g, int source);
+Traversal* graph_dfs(const Graph* g, int source);
+void       traversal_free(Traversal* t);
 
-void QuickSortKruskalMST(GraphEdge* edges, int count,int p, int q);
+void QuickSortKruskalMST(GraphEdge* edges, int count, int p, int q);
 
 void QuickSort(GraphEdge* edges, int count, int p, int q);
-
 
 /* ---- export ------------------------------------------------------------ */
 
@@ -165,6 +167,6 @@ void QuickSort(GraphEdge* edges, int count, int p, int q);
  *
  * Ritorna GRAPH_OK, o GRAPH_ERR_ARG su argomenti invalidi / errore di I/O.
  */
-int graph_export_dot(const Graph *g, const Traversal *t, const char *path);
+int graph_export_dot(const Graph* g, const Traversal* t, const char* path);
 
 #endif /* GRAPH_H */

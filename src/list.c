@@ -8,21 +8,22 @@
  * The only dynamic representation: add/remove are cheap, but in-neighbor
  * queries on directed graphs must scan every chain, O(n+m).
  */
-#include <stdlib.h>
 #include "../include/Graph.h"
+#include <stdlib.h>
 
-typedef struct EdgeNode {
-    int    to;
-    double w;
-    struct EdgeNode *next;
+typedef struct EdgeNode
+{
+    int              to;
+    double           w;
+    struct EdgeNode* next;
 } EdgeNode;
 
-static EdgeNode **heads(const Graph *g)
+static EdgeNode** heads(const Graph* g)
 {
-    return (EdgeNode**) g->data;
+    return (EdgeNode**)g->data;
 }
 
-static EdgeNode *find(EdgeNode *node, int v)
+static EdgeNode* find(EdgeNode* node, int v)
 {
     while (node && node->to != v)
         node = node->next;
@@ -30,22 +31,23 @@ static EdgeNode *find(EdgeNode *node, int v)
 }
 
 /* Push u->v on the front of u's chain. */
-static int push(Graph *g, int u, int v, double w)
+static int push(Graph* g, int u, int v, double w)
 {
-    EdgeNode *nd = malloc(sizeof *nd);
+    EdgeNode* nd = malloc(sizeof *nd);
     if (!nd)
         return GRAPH_ERR_ALLOC;
-    nd->to = v;
-    nd->w = w;
-    nd->next = heads(g)[u];
+    nd->to      = v;
+    nd->w       = w;
+    nd->next    = heads(g)[u];
     heads(g)[u] = nd;
     return GRAPH_OK;
 }
 
-static int list_add_edge(Graph *g, int u, int v, double w)
+static int list_add_edge(Graph* g, int u, int v, double w)
 {
-    EdgeNode *nd = find(heads(g)[u], v);
-    if (nd) {
+    EdgeNode* nd = find(heads(g)[u], v);
+    if (nd)
+    {
         /* edge exists: update the weight (both copies if undirected) */
         nd->w = w;
         if (!g->directed && u != v)
@@ -55,7 +57,8 @@ static int list_add_edge(Graph *g, int u, int v, double w)
     int rc = push(g, u, v, w);
     if (rc != GRAPH_OK)
         return rc;
-    if (!g->directed && u != v) {
+    if (!g->directed && u != v)
+    {
         rc = push(g, v, u, w);
         if (rc != GRAPH_OK)
             return rc;
@@ -66,12 +69,14 @@ static int list_add_edge(Graph *g, int u, int v, double w)
 
 /* Unlink v from u's chain; pointer-to-pointer avoids a "previous node"
  * special case for the head. Returns true if an edge was removed. */
-static bool unlink_edge(Graph *g, int u, int v)
+static bool unlink_edge(Graph* g, int u, int v)
 {
-    for (EdgeNode **pp = &heads(g)[u]; *pp; pp = &(*pp)->next) {
-        if ((*pp)->to == v) {
-            EdgeNode *dead = *pp;
-            *pp = dead->next;
+    for (EdgeNode** pp = &heads(g)[u]; *pp; pp = &(*pp)->next)
+    {
+        if ((*pp)->to == v)
+        {
+            EdgeNode* dead = *pp;
+            *pp            = dead->next;
             free(dead);
             return true;
         }
@@ -79,87 +84,97 @@ static bool unlink_edge(Graph *g, int u, int v)
     return false;
 }
 
-static int list_remove_edge(Graph *g, int u, int v)
+static int list_remove_edge(Graph* g, int u, int v)
 {
     if (!unlink_edge(g, u, v))
-        return GRAPH_OK;   /* absent edge: nothing to do */
+        return GRAPH_OK; /* absent edge: nothing to do */
     if (!g->directed && u != v)
         unlink_edge(g, v, u);
     g->m--;
     return GRAPH_OK;
 }
 
-static double list_get_weight(const Graph *g, int u, int v)
+static double list_get_weight(const Graph* g, int u, int v)
 {
-    EdgeNode *nd = find(heads(g)[u], v);
+    EdgeNode* nd = find(heads(g)[u], v);
     return nd ? nd->w : 0.0;
 }
 
-static int list_out_degree(const Graph *g, int u)
+static int list_out_degree(const Graph* g, int u)
 {
     int d = 0;
-    for (EdgeNode *nd = heads(g)[u]; nd; nd = nd->next)
+    for (EdgeNode* nd = heads(g)[u]; nd; nd = nd->next)
         d++;
     return d;
 }
 
-static int list_in_degree(const Graph *g, int u)
+static int list_in_degree(const Graph* g, int u)
 {
     if (!g->directed)
         return list_out_degree(g, u);
     /* directed: the chains only know successors -- full O(n+m) scan */
     int d = 0;
     for (int s = 0; s < g->n; s++)
-        for (EdgeNode *nd = heads(g)[s]; nd; nd = nd->next)
+        for (EdgeNode* nd = heads(g)[s]; nd; nd = nd->next)
             if (nd->to == u)
                 d++;
     return d;
 }
 
-static void list_iter_out(const Graph *g, int u, GraphIter *it)
+static void list_iter_out(const Graph* g, int u, GraphIter* it)
 {
-    it->g = g;
-    it->u = u;
-    it->i = 0;
+    it->g    = g;
+    it->u    = u;
+    it->i    = 0;
     it->node = heads(g)[u];
-    it->in = false;
+    it->in   = false;
 }
 
-static void list_iter_in(const Graph *g, int u, GraphIter *it)
+static void list_iter_in(const Graph* g, int u, GraphIter* it)
 {
-    it->g = g;
-    it->u = u;
+    it->g  = g;
+    it->u  = u;
     it->in = true;
-    if (!g->directed) {
-        it->i = 0;
-        it->node = heads(g)[u];   /* symmetric: in == out */
-    } else {
-        it->i = 0;                /* scan every chain for edges into u */
+    if (!g->directed)
+    {
+        it->i    = 0;
+        it->node = heads(g)[u]; /* symmetric: in == out */
+    }
+    else
+    {
+        it->i    = 0; /* scan every chain for edges into u */
         it->node = heads(g)[0];
     }
 }
 
-static bool list_iter_next(GraphIter *it, int *v, double *w)
+static bool list_iter_next(GraphIter* it, int* v, double* w)
 {
-    if (!it->in || !it->g->directed) {
-        EdgeNode *nd = it->node;
+    if (!it->in || !it->g->directed)
+    {
+        EdgeNode* nd = it->node;
         if (!nd)
             return false;
         it->node = nd->next;
-        if (v) *v = nd->to;
-        if (w) *w = nd->w;
+        if (v)
+            *v = nd->to;
+        if (w)
+            *w = nd->w;
         return true;
     }
     /* directed in-neighbors: resume the scan across all chains */
-    const Graph *g = it->g;
-    while (it->i < g->n) {
-        EdgeNode *nd = it->node;
+    const Graph* g = it->g;
+    while (it->i < g->n)
+    {
+        EdgeNode* nd = it->node;
         while (nd && nd->to != it->u)
             nd = nd->next;
-        if (nd) {
+        if (nd)
+        {
             it->node = nd->next;
-            if (v) *v = it->i;   /* the source vertex is the neighbor */
-            if (w) *w = nd->w;
+            if (v)
+                *v = it->i; /* the source vertex is the neighbor */
+            if (w)
+                *w = nd->w;
             return true;
         }
         it->i++;
@@ -168,12 +183,14 @@ static bool list_iter_next(GraphIter *it, int *v, double *w)
     return false;
 }
 
-static void list_destroy(Graph *g)
+static void list_destroy(Graph* g)
 {
-    for (int u = 0; u < g->n; u++) {
-        EdgeNode *nd = heads(g)[u];
-        while (nd) {
-            EdgeNode *next = nd->next;
+    for (int u = 0; u < g->n; u++)
+    {
+        EdgeNode* nd = heads(g)[u];
+        while (nd)
+        {
+            EdgeNode* next = nd->next;
             free(nd);
             nd = next;
         }
@@ -193,9 +210,9 @@ static const GraphOps list_ops = {
     .destroy     = list_destroy,
 };
 
-int list_init(Graph *g)
+int list_init(Graph* g)
 {
-    g->data = calloc((size_t)g->n, sizeof(EdgeNode *));
+    g->data = calloc((size_t)g->n, sizeof(EdgeNode*));
     if (!g->data)
         return GRAPH_ERR_ALLOC;
     g->ops = &list_ops;
