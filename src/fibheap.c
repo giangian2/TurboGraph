@@ -28,11 +28,12 @@ static void findMinInRootList(FibHeap* h);
 /* Allocates the heap struct and its backing arrays; frees whichever
  * allocations succeeded if another one fails, so no leak on the
  * partial-failure path. pos[] starts out the same size as the node arena
- * and is initialized to -1 ("key not in heap") everywhere. */
+ * and is initialized to -1 ("id not in heap") everywhere. */
 FibHeap* createFibHeap(size_t capacity)
 {
     FibHeap* h      = (FibHeap*)malloc(sizeof(FibHeap));
-    int*     key    = (int*)malloc(sizeof(int) * capacity);
+    int*     id     = (int*)malloc(sizeof(int) * capacity);
+    double*  weight = (double*)malloc(sizeof(double) * capacity);
     int*     parent = (int*)malloc(sizeof(int) * capacity);
     int*     child  = (int*)malloc(sizeof(int) * capacity);
     int*     left   = (int*)malloc(sizeof(int) * capacity);
@@ -41,17 +42,22 @@ FibHeap* createFibHeap(size_t capacity)
     bool*    mark   = (bool*)malloc(sizeof(bool) * capacity);
     int*     pos    = (int*)malloc(sizeof(int) * capacity);
 
-    if (h == NULL || key == NULL || parent == NULL || child == NULL || left == NULL ||
-        right == NULL || degree == NULL || mark == NULL || pos == NULL)
+    if (h == NULL || id == NULL || weight == NULL || parent == NULL || child == NULL ||
+        left == NULL || right == NULL || degree == NULL || mark == NULL || pos == NULL)
     {
         if (h)
         {
             free(h);
         }
 
-        if (key)
+        if (id)
         {
-            free(key);
+            free(id);
+        }
+
+        if (weight)
+        {
+            free(weight);
         }
 
         if (parent)
@@ -96,7 +102,8 @@ FibHeap* createFibHeap(size_t capacity)
         pos[i] = -1;
     }
 
-    h->key    = key;
+    h->id     = id;
+    h->weight = weight;
     h->parent = parent;
     h->child  = child;
     h->left   = left;
@@ -124,21 +131,21 @@ FibHeap* createFibHeap(size_t capacity)
 
 /* O(1) amortized: allocate a node, splice it into the root list as a
  * singleton tree, and update the min pointer if needed. */
-int fibInsert(FibHeap* h, int newKey)
+int fibInsert(FibHeap* h, int id, double weight)
 {
-    if (h == NULL || newKey < 0)
+    if (h == NULL || id < 0)
     {
         return FIBHEAP_ERR;
     }
 
-    if (expandPos(h, (size_t)newKey) != FIBHEAP_OK)
+    if (expandPos(h, (size_t)id) != FIBHEAP_OK)
     {
         return FIBHEAP_ERR;
     }
 
-    if (h->pos[newKey] != -1)
+    if (h->pos[id] != -1)
     {
-        return FIBHEAP_ERR; // duplicate keys are not supported
+        return FIBHEAP_ERR; // duplicate ids are not supported
     }
 
     int idx = allocNode(h);
@@ -147,7 +154,8 @@ int fibInsert(FibHeap* h, int newKey)
         return FIBHEAP_ERR; // arena expansion failed
     }
 
-    h->key[idx]    = newKey;
+    h->id[idx]     = id;
+    h->weight[idx] = weight;
     h->parent[idx] = -1;
     h->child[idx]  = -1;
     h->degree[idx] = 0;
@@ -157,12 +165,12 @@ int fibInsert(FibHeap* h, int newKey)
 
     addToRootList(h, idx);
 
-    if (h->min == -1 || h->key[idx] < h->key[h->min])
+    if (h->min == -1 || h->weight[idx] < h->weight[h->min])
     {
         h->min = idx;
     }
 
-    h->pos[newKey] = idx;
+    h->pos[id] = idx;
     h->size++;
     return FIBHEAP_OK;
 }
@@ -171,15 +179,19 @@ int fibInsert(FibHeap* h, int newKey)
  * then consolidate the root list so at most one tree of each degree
  * survives -- this is what keeps the amortized cost logarithmic despite
  * insert/decreaseKey doing O(1) worth of work each. */
-int fibExtractMin(FibHeap* h)
+int fibExtractMin(FibHeap* h, int* outId, double* outWeight)
 {
-    if (h == NULL || h->size == 0)
+    if (h == NULL || h->size == 0 || outId == NULL)
     {
         return FIBHEAP_ERR;
     }
 
-    int z      = h->min;
-    int minKey = h->key[z];
+    int z  = h->min;
+    *outId = h->id[z];
+    if (outWeight != NULL)
+    {
+        *outWeight = h->weight[z];
+    }
 
     int numChildren = h->degree[z];
     int c           = h->child[z];
@@ -198,7 +210,7 @@ int fibExtractMin(FibHeap* h)
     int survivor = h->right[z]; // any node still in the root list, or z itself if it was alone
     listRemove(h, z);
 
-    h->pos[minKey] = -1;
+    h->pos[h->id[z]] = -1;
     releaseNode(h, z); // best-effort: on failure the slot just isn't recycled
     h->size--;
 
@@ -212,51 +224,42 @@ int fibExtractMin(FibHeap* h)
         consolidate(h);
     }
 
-    return minKey;
+    return FIBHEAP_OK;
 }
 
-/* O(1) amortized: decreasing a key never violates heap order at the root,
- * only possibly against its parent, so at most one cut plus a cascade of
- * marked-ancestor cuts is needed -- no re-sift through the whole tree. */
-int fibDecreaseKey(FibHeap* h, int key, int delta)
+/* O(1) amortized: decreasing a weight never violates heap order at the
+ * root, only possibly against its parent, so at most one cut plus a
+ * cascade of marked-ancestor cuts is needed -- no re-sift through the
+ * whole tree. */
+int fibDecreaseKey(FibHeap* h, int id, double newWeight)
 {
-    if (h == NULL || key < 0 || delta < 0)
+    if (h == NULL || id < 0)
     {
         return FIBHEAP_ERR;
     }
 
-    if ((size_t)key >= h->posCapacity || h->pos[key] == -1)
+    if ((size_t)id >= h->posCapacity || h->pos[id] == -1)
     {
-        return FIBHEAP_ERR; // key is not currently in the heap
+        return FIBHEAP_ERR; // id is not currently in the heap
     }
 
-    int newKey = key - delta;
-    if (newKey < 0)
+    int idx = h->pos[id];
+
+    if (newWeight > h->weight[idx])
     {
-        return FIBHEAP_ERR;
+        return FIBHEAP_ERR; // decreaseKey only ever lowers the weight
     }
 
-    if (newKey != key && h->pos[newKey] != -1)
-    {
-        return FIBHEAP_ERR; // newKey would collide with another key already in the heap
-    }
-
-    int idx = h->pos[key];
-
-    // Same identity relabeling as DHeap::decreaseKey: retire the old slot
-    // and claim the decreased key's slot before touching tree structure.
-    h->pos[key]    = -1;
-    h->key[idx]    = newKey;
-    h->pos[newKey] = idx;
+    h->weight[idx] = newWeight;
 
     int parent = h->parent[idx];
-    if (parent != -1 && h->key[idx] < h->key[parent])
+    if (parent != -1 && h->weight[idx] < h->weight[parent])
     {
         cut(h, idx, parent);
         cascadingCut(h, parent);
     }
 
-    if (h->key[idx] < h->key[h->min])
+    if (h->weight[idx] < h->weight[h->min])
     {
         h->min = idx;
     }
@@ -271,7 +274,8 @@ void freeFibHeap(FibHeap* h)
         return;
     }
 
-    free(h->key);
+    free(h->id);
+    free(h->weight);
     free(h->parent);
     free(h->child);
     free(h->left);
@@ -285,10 +289,10 @@ void freeFibHeap(FibHeap* h)
 }
 
 /* Grows pos[] (doubling) until it can index `neededIndex`, initializing
- * newly added slots to -1 ("key not in heap"). Independent from
+ * newly added slots to -1 ("id not in heap"). Independent from
  * expandArena: the node arena grows with the number of nodes actually
- * live, pos[] grows with the largest key value seen so far -- the two
- * capacities can diverge. Concretely, keys here are node ids, so pos[]
+ * live, pos[] grows with the largest id value seen so far -- the two
+ * capacities can diverge. Concretely, ids here are node ids, so pos[]
  * tracks the id space (it must be able to index pos[maxIdInserted]), not
  * how many nodes happen to be live at once -- a heap holding one node
  * with id 10000 still needs pos[] to reach index 10000. */
@@ -332,10 +336,16 @@ static int expandArena(FibHeap* h)
 {
     size_t newCapacity = h->capacity == 0 ? 1 : h->capacity * 2;
 
-    int* newKey = (int*)realloc(h->key, sizeof(int) * newCapacity);
-    if (newKey)
+    int* newId = (int*)realloc(h->id, sizeof(int) * newCapacity);
+    if (newId)
     {
-        h->key = newKey;
+        h->id = newId;
+    }
+
+    double* newWeight = (double*)realloc(h->weight, sizeof(double) * newCapacity);
+    if (newWeight)
+    {
+        h->weight = newWeight;
     }
 
     int* newParent = (int*)realloc(h->parent, sizeof(int) * newCapacity);
@@ -374,7 +384,8 @@ static int expandArena(FibHeap* h)
         h->mark = newMark;
     }
 
-    if (!newKey || !newParent || !newChild || !newLeft || !newRight || !newDegree || !newMark)
+    if (!newId || !newWeight || !newParent || !newChild || !newLeft || !newRight || !newDegree ||
+        !newMark)
     {
         return FIBHEAP_ERR;
     }
@@ -492,7 +503,7 @@ static void addToRootList(FibHeap* h, int idx)
     listInsert(h, h->min, idx);
 }
 
-/* Makes y a child of x (caller guarantees x holds the smaller key):
+/* Makes y a child of x (caller guarantees x holds the smaller weight):
  * detaches y from the root list and splices it into x's child list. */
 static void link(FibHeap* h, int y, int x)
 {
@@ -592,13 +603,13 @@ static void consolidate(FibHeap* h)
         while (d < FIB_MAX_DEGREE && degreeTable[d] != -1)
         {
             int y = degreeTable[d];
-            if (h->key[y] < h->key[x])
+            if (h->weight[y] < h->weight[x])
             {
                 int tmp = x;
                 x       = y;
                 y       = tmp;
             }
-            link(h, y, x); // x holds the smaller key, y becomes its child
+            link(h, y, x); // x holds the smaller weight, y becomes its child
             degreeTable[d] = -1;
             d              = h->degree[x];
         }
@@ -622,7 +633,7 @@ static void consolidate(FibHeap* h)
             continue;
         }
 
-        if (h->min == -1 || h->key[x] < h->key[h->min])
+        if (h->min == -1 || h->weight[x] < h->weight[h->min])
         {
             h->min = x;
         }
@@ -639,7 +650,7 @@ static void findMinInRootList(FibHeap* h)
 
     while (w != h->min)
     {
-        if (h->key[w] < h->key[best])
+        if (h->weight[w] < h->weight[best])
         {
             best = w;
         }

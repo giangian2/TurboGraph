@@ -9,31 +9,36 @@ static void          expandDHeap(DHeap* h);
 static inline size_t getParentIndex(size_t i, size_t D);
 static inline size_t getStartSonIndex(size_t i, size_t D);
 static inline size_t getEndSonIndex(size_t i, size_t D);
-static inline int    getKey(size_t i, DHeap* h);
 static inline void   swap(DHeap* h, size_t i, size_t j);
 static void          moveUp(DHeap* h, size_t index);
 static void          moveDwn(DHeap* h, size_t index);
 
 /* Allocates the heap struct and its backing arrays; frees whichever
  * allocations succeeded if another one fails, so no leak on the
- * partial-failure path. pos[] starts out the same size as data[] and is
- * initialized to -1 ("key not in heap") everywhere. */
+ * partial-failure path. pos[] starts out the same size as id[]/weight[]
+ * and is initialized to -1 ("id not in heap") everywhere. */
 DHeap* createDHeap(size_t d, size_t capacity)
 {
-    DHeap* heap = (DHeap*)malloc(sizeof(DHeap));
-    int*   data = (int*)malloc(sizeof(int) * capacity);
-    int*   pos  = (int*)malloc(sizeof(int) * capacity);
+    DHeap*  heap   = (DHeap*)malloc(sizeof(DHeap));
+    int*    id     = (int*)malloc(sizeof(int) * capacity);
+    double* weight = (double*)malloc(sizeof(double) * capacity);
+    int*    pos    = (int*)malloc(sizeof(int) * capacity);
 
-    if (heap == NULL || data == NULL || pos == NULL)
+    if (heap == NULL || id == NULL || weight == NULL || pos == NULL)
     {
         if (heap)
         {
             free(heap);
         }
 
-        if (data)
+        if (id)
         {
-            free(data);
+            free(id);
+        }
+
+        if (weight)
+        {
+            free(weight);
         }
 
         if (pos)
@@ -51,95 +56,91 @@ DHeap* createDHeap(size_t d, size_t capacity)
     heap->capacity    = capacity;
     heap->size        = 0;
     heap->d           = d;
-    heap->data        = data;
+    heap->id          = id;
+    heap->weight      = weight;
     heap->pos         = pos;
     heap->posCapacity = capacity;
 
     return heap;
 }
 
-/* O(log_d n): pos[key] locates the node in O(1) -- see the DHeap struct
- * comment in DHeap.h -- so the only remaining cost is the sift-up. Since
- * delta >= 0, newKey <= key, and key already fits inside pos[] (it's
- * currently in the heap), so pos[] never needs to grow here; only insert()
- * can push posCapacity past the current key values. */
-int decreaseKey(DHeap* h, int key, int delta)
+/* O(log_d n): pos[id] locates the node in O(1) -- see the DHeap struct
+ * comment in DHeap.h -- so the only remaining cost is the sift-up. Unlike
+ * a design where the priority doubles as its own identity, newWeight
+ * colliding with another node's weight is not a concern here: weights may
+ * repeat freely, only ids must stay unique. */
+int decreaseKey(DHeap* h, int id, double newWeight)
 {
-    if (h == NULL || key < 0 || delta < 0)
+    if (h == NULL || id < 0)
     {
         return DHEAP_ERR;
     }
 
-    if ((size_t)key >= h->posCapacity || h->pos[key] == -1)
+    if ((size_t)id >= h->posCapacity || h->pos[id] == -1)
     {
-        return DHEAP_ERR; // key is not currently in the heap
+        return DHEAP_ERR; // id is not currently in the heap
     }
 
-    int newKey = key - delta;
-    if (newKey < 0)
+    size_t index = (size_t)h->pos[id];
+
+    if (newWeight > h->weight[index])
     {
-        return DHEAP_ERR;
+        return DHEAP_ERR; // decreaseKey only ever lowers the weight
     }
 
-    if (newKey != key && h->pos[newKey] != -1)
-    {
-        return DHEAP_ERR; // newKey would collide with another key already in the heap
-    }
-
-    size_t index = (size_t)h->pos[key];
-
-    // pos[] is keyed by value, not by a separate stable handle, so
-    // decreasing a key also changes its identity: retire the old slot and
-    // claim the decreased key's slot before sifting up.
-    h->pos[key]    = -1;
-    h->data[index] = newKey;
-    h->pos[newKey] = (int)index;
-
+    h->weight[index] = newWeight;
     moveUp(h, index);
     return DHEAP_OK;
 }
 
 /* Removes the root, plugs the gap with the last element (kept compact for
  * the array representation), then sifts it down. pos[] is updated for
- * both the removed key and the relocated one. */
-int extractMin(DHeap* h)
+ * both the removed id and the relocated one. */
+int extractMin(DHeap* h, int* outId, double* outWeight)
 {
-    if (h == NULL || h->size == 0)
+    if (h == NULL || h->size == 0 || outId == NULL)
     {
         return DHEAP_ERR;
     }
 
-    int min     = h->data[0];
-    h->pos[min] = -1;
+    *outId = h->id[0];
+    if (outWeight != NULL)
+    {
+        *outWeight = h->weight[0];
+    }
+
+    h->pos[h->id[0]] = -1;
     h->size--;
 
     if (h->size > 0)
     {
-        h->data[0]         = h->data[h->size];
-        h->pos[h->data[0]] = 0;
+        h->id[0]         = h->id[h->size];
+        h->weight[0]     = h->weight[h->size];
+        h->pos[h->id[0]] = 0;
         moveDwn(h, 0);
     }
 
-    return min;
+    return DHEAP_OK;
 }
 
-/* Grows data[] (element storage) and pos[] (key-value index range)
- * independently as needed, appends newKey at the tail, then sifts it up. */
-int insert(DHeap* h, int newKey)
+/* Grows id[]/weight[] (element storage) and pos[] (id-value index range)
+ * independently as needed, appends id/weight at the tail, then sifts it
+ * up. */
+int insert(DHeap* h, int id, double weight)
 {
-    if (h == NULL || newKey < 0)
+    if (h == NULL || id < 0)
     {
         return DHEAP_ERR;
     }
 
-    if (expandPos(h, (size_t)newKey) != DHEAP_OK)
+    if (expandPos(h, (size_t)id) != DHEAP_OK)
     {
         return DHEAP_ERR;
     }
 
-    if (h->pos[newKey] != -1)
+    if (h->pos[id] != -1)
     {
-        return DHEAP_ERR; // duplicate keys are not supported
+        return DHEAP_ERR; // duplicate ids are not supported
     }
 
     if (h->size == h->capacity)
@@ -151,9 +152,10 @@ int insert(DHeap* h, int newKey)
         }
     }
 
-    size_t index   = h->size;
-    h->data[index] = newKey;
-    h->pos[newKey] = (int)index;
+    size_t index     = h->size;
+    h->id[index]     = id;
+    h->weight[index] = weight;
+    h->pos[id]       = (int)index;
     h->size++;
 
     moveUp(h, index);
@@ -167,19 +169,20 @@ void freeDHeap(DHeap* h)
         return;
     }
 
-    free(h->data);
+    free(h->id);
+    free(h->weight);
     free(h->pos);
     free(h);
 }
 
 /* Grows pos[] (doubling) until it can index `neededIndex`, initializing
- * newly added slots to -1 ("key not in heap"). Independent from
- * expandDHeap: data[] grows with the number of elements actually stored,
- * pos[] grows with the largest key value seen so far -- the two capacities
- * can diverge. Concretely, keys here are node ids, so pos[] tracks the id
- * space (it must be able to index pos[maxIdInserted]), not how many nodes
- * happen to be in the heap at once -- a heap holding one node with id
- * 10000 still needs pos[] to reach index 10000. */
+ * newly added slots to -1 ("id not in heap"). Independent from
+ * expandDHeap: id[]/weight[] grow with the number of elements actually
+ * stored, pos[] grows with the largest id value seen so far -- the two
+ * capacities can diverge. Concretely, ids here are node ids, so pos[]
+ * tracks the id space (it must be able to index pos[maxIdInserted]), not
+ * how many nodes happen to be in the heap at once -- a heap holding one
+ * node with id 10000 still needs pos[] to reach index 10000. */
 static int expandPos(DHeap* h, size_t neededIndex)
 {
     if (neededIndex < h->posCapacity)
@@ -209,22 +212,35 @@ static int expandPos(DHeap* h, size_t neededIndex)
     return DHEAP_OK;
 }
 
-/* Doubles the backing array's capacity via realloc. On failure the heap is
- * left untouched (h->data/h->capacity unchanged) so it stays usable, just
- * unable to grow further. */
+/* Doubles id[]/weight[] via realloc, one call per array. h->capacity only
+ * advances once both arrays have grown successfully: if one fails, the
+ * array that did grow simply carries unused headroom past h->capacity
+ * (harmless -- nothing is ever indexed past h->capacity), and the next
+ * expansion attempt retries it at little extra cost, since realloc to a
+ * size it already holds is cheap. This keeps both arrays' *valid* length
+ * in lockstep without needing a rollback path. */
 static void expandDHeap(DHeap* h)
 {
     size_t currentCapacity = h->capacity;
     size_t newCapacity     = currentCapacity * 2;
 
-    int* newData = (int*)realloc(h->data, sizeof(int) * newCapacity);
-    if (newData == NULL)
+    int* newId = (int*)realloc(h->id, sizeof(int) * newCapacity);
+    if (newId)
+    {
+        h->id = newId;
+    }
+
+    double* newWeight = (double*)realloc(h->weight, sizeof(double) * newCapacity);
+    if (newWeight)
+    {
+        h->weight = newWeight;
+    }
+
+    if (!newId || !newWeight)
     {
         return;
     }
-    // realloc already frees/reuses the old block as needed, no manual free here
-    // free(h->data);
-    h->data     = newData;
+
     h->capacity = newCapacity;
 }
 
@@ -247,21 +263,22 @@ static inline size_t getEndSonIndex(size_t i, size_t D)
     return (D * i) + D;
 }
 
-static inline int getKey(size_t i, DHeap* h)
-{
-    return h->data[i];
-}
-
-/* Swaps two data[] slots and keeps pos[] in sync with the values' new
- * locations -- this is what lets decreaseKey() find any key in O(1). */
+/* Swaps two (id, weight) pairs and keeps pos[] in sync with their new
+ * locations -- this is what lets decreaseKey() find any id in O(1). id
+ * and weight always move together: a single pos[] entry per id is enough
+ * because the pair never splits across positions. */
 static inline void swap(DHeap* h, size_t i, size_t j)
 {
-    int tmp    = getKey(i, h);
-    h->data[i] = h->data[j];
-    h->data[j] = tmp;
+    int    tmpId     = h->id[i];
+    double tmpWeight = h->weight[i];
 
-    h->pos[h->data[i]] = (int)i;
-    h->pos[h->data[j]] = (int)j;
+    h->id[i]     = h->id[j];
+    h->weight[i] = h->weight[j];
+    h->id[j]     = tmpId;
+    h->weight[j] = tmpWeight;
+
+    h->pos[h->id[i]] = (int)i;
+    h->pos[h->id[j]] = (int)j;
 }
 
 /* Sift-up: bubbles the node at `index` toward the root by repeatedly
@@ -273,7 +290,7 @@ static void moveUp(DHeap* h, size_t index)
     {
         size_t parent = getParentIndex(index, h->d);
 
-        if (getKey(parent, h) <= getKey(index, h))
+        if (h->weight[parent] <= h->weight[index])
         {
             break; // heap property already satisfied
         }
@@ -305,13 +322,13 @@ static void moveDwn(DHeap* h, size_t index)
             end_son = h->size - 1;
         }
 
-        // Find the child with the minimum value among all D children present
+        // Find the child with the minimum weight among all D children present
         size_t smallest_son_index = start_son;
-        int    min_value          = getKey(start_son, h);
+        double min_value          = h->weight[start_son];
 
         for (size_t i = start_son + 1; i <= end_son; i++)
         {
-            int current_value = getKey(i, h);
+            double current_value = h->weight[i];
             if (current_value < min_value)
             {
                 min_value          = current_value;
@@ -320,7 +337,7 @@ static void moveDwn(DHeap* h, size_t index)
         }
 
         // If the current node is already <= the smallest child, the property holds
-        if (getKey(index, h) <= min_value)
+        if (h->weight[index] <= min_value)
         {
             break;
         }
