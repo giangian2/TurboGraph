@@ -15,7 +15,14 @@
  * being their own identity: two elements can never hold the same value at
  * once, and decreasing a key also changes the identity pos[] tracks for it.
  * `pos` grows on demand (independently of `data`) as keys past its current
- * length are inserted; keys must be non-negative. */
+ * length are inserted; keys must be non-negative.
+ *
+ * In graph algorithms these keys are node/vertex ids, so `pos` is sized to
+ * the largest id seen so far, not to the number of nodes actually in the
+ * heap right now -- those two can differ a lot. Inserting a single node
+ * with id 10000 still requires `pos` to span index 10000, even if the heap
+ * holds just that one element; that is why `pos` grows with the id space,
+ * independently of `data`/`size`/`capacity`. */
 typedef struct
 {
     int*   data;

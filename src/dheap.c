@@ -176,7 +176,10 @@ void freeDHeap(DHeap* h)
  * newly added slots to -1 ("key not in heap"). Independent from
  * expandDHeap: data[] grows with the number of elements actually stored,
  * pos[] grows with the largest key value seen so far -- the two capacities
- * can diverge. */
+ * can diverge. Concretely, keys here are node ids, so pos[] tracks the id
+ * space (it must be able to index pos[maxIdInserted]), not how many nodes
+ * happen to be in the heap at once -- a heap holding one node with id
+ * 10000 still needs pos[] to reach index 10000. */
 static int expandPos(DHeap* h, size_t neededIndex)
 {
     if (neededIndex < h->posCapacity)
