@@ -304,7 +304,7 @@ int star_init_from_edges(Graph* g, const GraphEdge* edges, size_t m)
     const int    tot_nodes = g->n;
     const bool   back      = g->directed;            // only directed graphs need the in star
     const size_t tot_arcs  = arc_count(g, edges, m); // physical arcs: 2m - self-loops when
-                                                    // undirected
+                                                     // undirected
 
     /*
      * Offsets of the segments inside the single block, computed with an
