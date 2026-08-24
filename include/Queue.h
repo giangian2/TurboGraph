@@ -2,6 +2,7 @@
 #define QUEUE_H
 
 #include <stdbool.h>
+#include <stddef.h> /* size_t */
 
 /*
  * Fixed-capacity FIFO queue, generic over the element type, backed by a
