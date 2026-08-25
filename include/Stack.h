@@ -5,28 +5,45 @@
 #include <stddef.h> /* size_t */
 
 /*
- * Fixed-capacity LIFO stack, generic over the element type.
- * Elements are stored BY VALUE in a single contiguous buffer
- * (cap * elem_size bytes) to preserve cache locality.
+ * Shadow-header generic stack, stb_ds.h style: a stack IS a plain typed
+ * pointer (T*), not a wrapper struct. Its bookkeeping (count/cap) lives
+ * in a StackHdr allocated right before the data and reached via pointer
+ * arithmetic (see stack__hdr below) -- so there's no void* / elem_size to
+ * thread through the API, and elements are addressed/typed natively:
+ * s[i] just works, and the compiler catches type mismatches at push.
+ *
+ * Fixed-capacity, same as the struct-based version this replaces: sized
+ * once at creation (e.g. cap = g->n for a traversal), no growth on push.
+ *
+ * Caveat inherited from the pattern: s (and out, where present) may be
+ * evaluated more than once by these macros. Fine for a bare variable,
+ * not for an expression with side effects.
  */
 typedef struct
 {
-    void*  data;
-    int    count; /* elements currently on the stack */
-    int    cap;
-    size_t elem_size; /* bytes per element, fixed at creation */
-} Stack;
+    size_t count; /* elements currently on the stack */
+    size_t cap;
+} StackHdr;
 
-/* NULL on allocation failure, cap <= 0, or elem_size == 0. */
-Stack* stack_create(int cap, size_t elem_size);
-void   stack_free(Stack* s);
+#define stack__hdr(s) ((StackHdr*)(void*)(s) - 1)
 
-bool stack_is_empty(const Stack* s);
+void* stack__create(size_t elem_size, size_t cap);
+void  stack__free(void* s);
 
-/* Copies elem_size bytes from *v into the stack. false if full. */
-bool stack_push(Stack* s, const void* v);
+/* NULL on allocation failure or cap == 0. */
+#define stack_create(T, cap) ((T*)stack__create(sizeof(T), (cap)))
+#define stack_free(s) stack__free((void*)(s))
 
-/* Copies the top element into *v (elem_size bytes). false if empty. */
-bool stack_pop(Stack* s, void* v);
+#define stack_len(s) ((s) ? stack__hdr(s)->count : (size_t)0)
+#define stack_is_empty(s) (stack_len(s) == 0)
+
+/* Pushes v onto the stack. false if full. */
+#define stack_push(s, v)                                                                         \
+    (stack__hdr(s)->count < stack__hdr(s)->cap ? ((s)[stack__hdr(s)->count++] = (v), true)        \
+                                                : false)
+
+/* Pops and returns the top element. Precondition: !stack_is_empty(s),
+ * same as arrpop() in stb_ds.h -- no bounds check here, caller's job. */
+#define stack_pop(s) ((s)[--stack__hdr(s)->count])
 
 #endif /* STACK_H */

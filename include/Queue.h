@@ -5,32 +5,51 @@
 #include <stddef.h> /* size_t */
 
 /*
- * Fixed-capacity FIFO queue, generic over the element type, backed by a
- * circular buffer. Elements are stored BY VALUE in a single contiguous
- * block (cap * elem_size bytes) for cache locality. Sized once at
- * creation: enough for traversals, where each vertex is enqueued at
- * most once (capacity = g->n).
+ * Shadow-header generic FIFO queue, stb_ds.h style: a queue IS a plain
+ * typed pointer (T*) backed by a circular buffer, not a wrapper struct.
+ * Its bookkeeping (head/count/cap) lives in a QueueHdr allocated right
+ * before the data and reached via pointer arithmetic (see queue__hdr
+ * below) -- so there's no void* / elem_size to thread through the API,
+ * and elements are addressed/typed natively.
+ *
+ * Fixed-capacity, same as the struct-based version this replaces: sized
+ * once at creation, enough for traversals where each vertex is enqueued
+ * at most once (capacity = g->n).
+ *
+ * Caveat inherited from the pattern: q (and out, where present) may be
+ * evaluated more than once by these macros. Fine for a bare variable,
+ * not for an expression with side effects.
  */
 typedef struct
 {
-    void*  data;
-    int    head;  /* index of the next element to dequeue  */
-    int    count; /* elements currently in the queue       */
-    int    cap;
-    size_t elem_size; /* bytes per element, fixed at creation  */
-} Queue;
+    size_t head;  /* index of the next element to dequeue */
+    size_t count; /* elements currently in the queue       */
+    size_t cap;
+} QueueHdr;
 
-/* NULL on allocation failure, cap <= 0, or elem_size == 0. */
-Queue* queue_create(int cap, size_t elem_size);
-void   queue_free(Queue* q);
+#define queue__hdr(q) ((QueueHdr*)(void*)(q) - 1)
 
-bool queue_is_empty(const Queue* q);
+void*  queue__create(size_t elem_size, size_t cap);
+void   queue__free(void* q);
+size_t queue__pop_index(QueueHdr* hdr);
 
-/* Copies elem_size bytes from *v into the queue. false if full. */
-bool queue_enqueue(Queue* q, const void* v);
+/* NULL on allocation failure or cap == 0. */
+#define queue_create(T, cap) ((T*)queue__create(sizeof(T), (cap)))
+#define queue_free(q) queue__free((void*)(q))
 
-/* Copies the oldest element into *v (elem_size bytes); false if empty.
- * v may be NULL to discard the element. */
-bool queue_dequeue(Queue* q, void* v);
+#define queue_len(q) ((q) ? queue__hdr(q)->count : (size_t)0)
+#define queue_is_empty(q) (queue_len(q) == 0)
+
+/* Enqueues v. false if full. */
+#define queue_enqueue(q, v)                                                                       \
+    (queue__hdr(q)->count < queue__hdr(q)->cap                                                     \
+         ? ((q)[(queue__hdr(q)->head + queue__hdr(q)->count) % queue__hdr(q)->cap] = (v),          \
+            queue__hdr(q)->count++, true)                                                          \
+         : false)
+
+/* Dequeues and returns the oldest element. Precondition:
+ * !queue_is_empty(q), same as arrpop() in stb_ds.h -- no bounds check
+ * here, caller's job. */
+#define queue_dequeue(q) ((q)[queue__pop_index(queue__hdr(q))])
 
 #endif /* QUEUE_H */

@@ -1,62 +1,37 @@
 #include "../include/Queue.h"
 #include <stdlib.h>
-#include <string.h>
 
-Queue* queue_create(int cap, size_t elem_size)
+/* Single allocation for header + data, contiguous just like the header
+ * comment promises: (QueueHdr | data...), with the returned pointer
+ * aimed just past the header, at data[0]. */
+void* queue__create(size_t elem_size, size_t cap)
 {
-    if (cap <= 0 || elem_size == 0)
+    if (elem_size == 0 || cap == 0)
         return NULL;
-    Queue* q = malloc(sizeof(Queue));
-    if (!q)
+
+    QueueHdr* hdr = malloc(sizeof(QueueHdr) + elem_size * cap);
+    if (!hdr)
         return NULL;
-    q->data = malloc((size_t)cap * elem_size);
-    if (!q->data)
-    {
-        free(q);
-        return NULL;
-    }
-    q->head      = 0;
-    q->count     = 0;
-    q->elem_size = elem_size;
-    q->cap       = cap;
-    return q;
+
+    hdr->head  = 0;
+    hdr->count = 0;
+    hdr->cap   = cap;
+    return hdr + 1;
 }
 
-void queue_free(Queue* q)
+void queue__free(void* q)
 {
     if (!q)
         return;
-    free(q->data);
-    free(q);
+    free(queue__hdr(q));
 }
 
-bool queue_is_empty(const Queue* q)
+/* Advances the circular buffer past one element and returns the index
+ * it was read from. Caller (queue_dequeue) must ensure count > 0. */
+size_t queue__pop_index(QueueHdr* hdr)
 {
-    return q->count == 0;
-}
-
-bool queue_enqueue(Queue* q, const void* v)
-{
-    if (q->count == q->cap)
-        return false;
-    void* slot = (char*)q->data + q->elem_size * ((q->head + q->count) % q->cap);
-    memcpy(slot, v, q->elem_size);
-    q->count++;
-    return true;
-}
-
-bool queue_dequeue(Queue* q, void* v)
-{
-    if (q->count == 0)
-        return false;
-
-    const void* slot = NULL;
-    if (v)
-    {
-        slot = (char*)q->data + q->elem_size * q->head;
-        memcpy(v, slot, q->elem_size);
-    }
-    q->head = (q->head + 1) % q->cap;
-    q->count--;
-    return true;
+    size_t idx = hdr->head;
+    hdr->head  = (hdr->head + 1) % hdr->cap;
+    hdr->count--;
+    return idx;
 }

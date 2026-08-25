@@ -219,7 +219,7 @@ Traversal* graph_bfs(const Graph* g, int source)
 
     /* Capacity g->n: given the invariant above, the queue can never fill
      * up, so the enqueues below can never fail. */
-    Queue* q = queue_create(g->n, sizeof(int));
+    int* q = queue_create(int, g->n);
     if (!q)
     {
         traversal_free(t);
@@ -230,12 +230,13 @@ Traversal* graph_bfs(const Graph* g, int source)
      * no parent (stays -1), first vertex in the visit order. */
     t->dist[source]      = 0;
     t->order[t->count++] = source;
-    queue_enqueue(q, &source);
+    queue_enqueue(q, source);
 
     /* While there is a discovered but not-yet-processed vertex... */
-    int u;
-    while (queue_dequeue(q, &u))
+    while (!queue_is_empty(q))
     {
+        int u = queue_dequeue(q);
+
         /* Iterate the outgoing neighbors of u (the vertex just dequeued,
          * NOT the source). The iterator lives on the stack: no malloc. */
         GraphIter it;
@@ -252,7 +253,7 @@ Traversal* graph_bfs(const Graph* g, int source)
             t->dist[v]           = t->dist[u] + 1;
             t->parent[v]         = u;
             t->order[t->count++] = v;
-            queue_enqueue(q, &v);
+            queue_enqueue(q, v);
         }
     }
 
