@@ -2,7 +2,8 @@ CC      = gcc
 CFLAGS  = -std=c11 -Wall -Wextra -g -Iinclude -O0
 
 # library sources (main.c is NOT part of the library)
-SRC = src/graph.c src/list.c src/star.c src/queue.c src/stack.c src/importer.c src/dheap.c src/fibheap.c
+SRC = src/graph.c src/list.c src/star.c src/queue.c src/stack.c src/importer.c src/dheap.c \
+      src/fibheap.c src/traversal.c src/sorting.c src/export.c
 HDR = $(wildcard include/*.h)
 OBJ = $(SRC:src/%.c=build/%.o)
 LIB = bin/libgraph.a

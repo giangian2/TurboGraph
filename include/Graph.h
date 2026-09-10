@@ -82,6 +82,17 @@ struct Graph
     void*           data; /* representation-specific storage             */
 };
 
+/**
+ * @param g Graph
+ * @param v Vertex
+ *
+ * @return True if the vertex can exists into the graph g with n edges, False otherwise
+ */
+static inline bool vertex_ok(const Graph* g, int v)
+{
+    return v >= 0 && v < g->n;
+}
+
 /* Representation constructors: fill g->data and g->ops for an already
  * populated Graph shell (n, directed, repr set; m = 0). Return GRAPH_OK
  * or GRAPH_ERR_ALLOC. */
@@ -124,49 +135,5 @@ int graph_iter_in(const Graph* g, int u, GraphIter* it);
 /* Yields the next neighbor into *v (and its weight into *w, if non-NULL);
  * returns false when exhausted. */
 bool graph_iter_next(GraphIter* it, int* v, double* w);
-
-/* ---- traversals -------------------------------------------------------- */
-
-/*
- * Result of a BFS or DFS from a source vertex. Arrays have length n and
- * are indexed by vertex; unreached vertices have parent == -1, dist == -1.
- *
- *   order   the `count` reached vertices, in visit order
- *   parent  traversal-tree parent (-1 for the source and unreached)
- *   dist    BFS: edge distance from the source
- *           DFS: depth in the DFS tree
- */
-typedef struct
-{
-    int* order;
-    int* parent;
-    int* dist;
-    int  count; // numero totale di vertici raggiunti
-    int  n;     // numero totale di vertific del grafo
-} Traversal;
-
-Traversal* graph_bfs(const Graph* g, int source);
-Traversal* graph_dfs(const Graph* g, int source);
-void       traversal_free(Traversal* t);
-
-void QuickSortKruskalMST(GraphEdge* edges, int count, int p, int q);
-
-void QuickSort(GraphEdge* edges, int count, int p, int q);
-
-/* ---- export ------------------------------------------------------------ */
-
-/*
- * Scrive il grafo su `path` in formato Graphviz DOT (renderizzabile con
- * `dot -Tpng file.dot -o file.png`). Generica: usa solo gli iteratori,
- * quindi funziona con qualunque rappresentazione.
- *
- * Se t != NULL evidenzia la visita: i nodi raggiunti mostrano la distanza
- * dalla sorgente e gli archi dell'albero di visita (parent[]) sono rossi
- * e spessi -- i cammini minimi della BFS si leggono seguendo gli archi
- * rossi a ritroso. Con t == NULL esporta il grafo e basta.
- *
- * Ritorna GRAPH_OK, o GRAPH_ERR_ARG su argomenti invalidi / errore di I/O.
- */
-int graph_export_dot(const Graph* g, const Traversal* t, const char* path);
 
 #endif /* GRAPH_H */

@@ -1,5 +1,8 @@
+#include "../include/Export.h"
 #include "../include/Graph.h"
 #include "../include/Importer.h"
+#include "../include/Sorting.h"
+#include "../include/Traversal.h"
 #include <stdio.h>
 
 /* Stampa il cammino minimo source -> v risalendo parent[] a ritroso.
