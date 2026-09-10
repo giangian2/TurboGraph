@@ -7,8 +7,8 @@
 
 /* I grafi di input stanno in res/, tutto cio' che viene generato in out/.
  * I percorsi sono relativi alla radice del progetto: esegui con `make run`. */
-#define INPUT_DOT "res/twitch.dot"
-#define OUTPUT_DOT "out/twitch_bfs.dot"
+#define INPUT_DOT "res/europe_roads.dot"
+#define OUTPUT_DOT "out/europe_roads_bfs.dot"
 
 /* Stampa il cammino minimo source -> v risalendo parent[] a ritroso.
  * Ricorsiva: prima stampa il cammino fino al padre, poi v stesso. */
@@ -49,19 +49,19 @@ int main(void)
     }
     printf("\nimportato " INPUT_DOT ": %d vertici, %zu archi\n", roads->n, roads->m);
 
-    Traversal* rt = graph_bfs(roads, 1);
+    Traversal* rt = graph_bfs(roads, 7);
     if (!rt)
     {
         fprintf(stderr, "BFS su " INPUT_DOT " fallita\n");
         graph_free(roads);
         return 1;
     }
-    printf("BFS da 1: raggiunti %d vertici su %d\n", rt->count, rt->n);
+    printf("BFS da 7: raggiunti %d vertici su %d\n", rt->count, rt->n);
 
     if (rt->count > 1)
     {
         int far = rt->order[rt->count - 1];
-        printf("cammino minimo 1 -> %d (%d archi): ", far, rt->dist[far]);
+        printf("cammino minimo 7 -> %d (%d archi): ", far, rt->dist[far]);
         print_path(rt, far);
         printf("\n");
     }
