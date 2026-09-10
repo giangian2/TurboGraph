@@ -5,6 +5,11 @@
 #include "../include/Traversal.h"
 #include <stdio.h>
 
+/* I grafi di input stanno in res/, tutto cio' che viene generato in out/.
+ * I percorsi sono relativi alla radice del progetto: esegui con `make run`. */
+#define INPUT_DOT "res/twitch.dot"
+#define OUTPUT_DOT "out/twitch_bfs.dot"
+
 /* Stampa il cammino minimo source -> v risalendo parent[] a ritroso.
  * Ricorsiva: prima stampa il cammino fino al padre, poi v stesso. */
 static void print_path(const Traversal* t, int v)
@@ -19,11 +24,7 @@ static void print_path(const Traversal* t, int v)
 
 int main(void)
 {
-    /*
-     * Grafo di esempio (non diretto, 9 vertici):
-     * due rombi concatenati 0..5, una coda 5-6-7, e il vertice 8
-     * isolato per far vedere come appare un nodo non raggiunto.
-     */
+
     GraphEdge edges[] = {
         {0, 1, 1.0}, {0, 2, 2.0}, {1, 3, 1.5}, {2, 3, 1.0}, {2, 4, 3.0},
         {7, 8, 5.0}, {3, 5, 2.0}, {4, 5, 1.0}, {5, 6, 1.0}, {6, 7, 4.0},
@@ -40,35 +41,37 @@ int main(void)
         printf("MST QICK FIRST EDGE:  [%i,%i].cost=%f \n", edges[i].u, edges[i].v, edges[i].w);
     }
 
-    /*
-     * Stesso identico flusso (crea grafo -> BFS -> export), ma il grafo
-     * stavolta arriva da file invece che da un array in codice: graph_import_dot()
-     * ritorna un Graph* qualunque come graph_from_edges(), quindi tutto
-     * il resto dell'API (BFS, export, ...) non cambia.
-     */
-    Graph* roads = graph_import_dot("twitch.dot", GRAPH_STAR);
+    Graph* roads = graph_import_dot(INPUT_DOT, GRAPH_STAR);
     if (!roads)
     {
-        fprintf(stderr, "import di twitch.dot fallito\n");
+        fprintf(stderr, "import di " INPUT_DOT " fallito\n");
         return 1;
     }
-    printf("\nimportato europe_roads.dot: %d vertici, %zu archi\n", roads->n, roads->m);
+    printf("\nimportato " INPUT_DOT ": %d vertici, %zu archi\n", roads->n, roads->m);
 
     Traversal* rt = graph_bfs(roads, 1);
     if (!rt)
     {
-        fprintf(stderr, "BFS su europe_roads fallita\n");
+        fprintf(stderr, "BFS su " INPUT_DOT " fallita\n");
         graph_free(roads);
         return 1;
     }
     printf("BFS da 1: raggiunti %d vertici su %d\n", rt->count, rt->n);
 
-    int rc = graph_export_dot(roads, rt, "twitch_bfs.dot");
+    if (rt->count > 1)
+    {
+        int far = rt->order[rt->count - 1];
+        printf("cammino minimo 1 -> %d (%d archi): ", far, rt->dist[far]);
+        print_path(rt, far);
+        printf("\n");
+    }
+
+    int rc = graph_export_dot(roads, rt, OUTPUT_DOT);
     if (rc != GRAPH_OK)
         fprintf(stderr, "export DOT fallito (%d)\n", rc);
     else
-        printf("Scritto europe_bfs.dot -- renderizza con:\n"
-               "  dot -Tpng twitch_bfs.dot -o twitch_bfs.png\n");
+        printf("Scritto " OUTPUT_DOT " -- renderizza con:\n"
+               "  dot -Tpng " OUTPUT_DOT " -o out/twitch_bfs.png\n");
 
     traversal_free(rt);
     graph_free(roads);

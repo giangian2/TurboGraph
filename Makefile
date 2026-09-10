@@ -20,11 +20,13 @@ $(LIB): $(OBJ) | bin
 build/%.o: src/%.c $(HDR) | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
-run: bin/main
+# main.c reads res/ and writes out/, both relative to the project root
+run: bin/main | out
 	./bin/main
 
 # output directories, created on demand
-bin build:
+# (out/ holds the generated DOT/PNG exports and is not removed by `clean`)
+bin build out:
 	mkdir -p $@
 
 memcheck:

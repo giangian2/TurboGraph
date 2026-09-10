@@ -88,6 +88,9 @@ Traversal* graph_bfs(const Graph* g, int source)
 
 void PrimMST(GraphEdge* edges, int count)
 {
+    /* TODO: da implementare */
+    (void)edges;
+    (void)count;
 }
 
 void traversal_free(Traversal* t)
