@@ -46,4 +46,12 @@ void  stack__free(void* s);
  * same as arrpop() in stb_ds.h -- no bounds check here, caller's job. */
 #define stack_pop(s) ((s)[--stack__hdr(s)->count])
 
+/* The top element as an lvalue: it can be read, assigned, or have its
+ * address taken to be mutated in place (&stack_top(s)) -- which is what
+ * a frame-based traversal needs, to advance the cursor stored in the
+ * frame without popping and re-pushing it. The pointer stays valid until
+ * that frame is popped: the capacity is fixed, so a push never moves the
+ * data. Precondition: !stack_is_empty(s), as for stack_pop. */
+#define stack_top(s) ((s)[stack__hdr(s)->count - 1])
+
 #endif /* STACK_H */
