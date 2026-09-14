@@ -106,9 +106,11 @@ applications and code-intelligence tools without becoming the bottleneck.
 ## Building
 
 ```sh
-make            # builds bin/libgraph.a and the bin/main demo
+make            # builds bin/libgraph.a and the bin/main demo (-O0, debuggable)
+make OPT=-O2    # optimized build; switching OPT rebuilds from scratch
 make run        # runs the demo
 make memcheck   # runs the demo under valgrind
+make profile    # profiles the demo with callgrind (see below)
 make clean
 ```
 
@@ -119,14 +121,54 @@ you also need Graphviz:
 dot -Tpng twitch_bfs.dot -o twitch_bfs.png
 ```
 
+## Profiling
+
+`make profile` rebuilds at `-O2` and runs the demo under callgrind, which
+counts the instructions actually executed and attributes them to the source
+line. It does not sample, so two runs of the same binary produce the exact
+same number -- which is what makes it usable to answer *"did my change reduce
+the work?"* on a laptop whose wall-clock noise is a few milliseconds.
+
+```sh
+make profile                                     # whole program
+make profile PROFFLAGS="-f graph_dfs"            # only inside graph_dfs
+make profile PROFFLAGS="-f graph_dfs -c -B"      # also simulate cache and branch predictor
+make profile PROFFLAGS="-f graph_dfs -l"         # annotate the sources line by line
+tools/profile.sh --help                          # every option
+```
+
+Profiles land in `out/profile/` (git-ignored). Save one as a baseline, change
+the code, then compare:
+
+```sh
+make profile PROFFLAGS="-f graph_dfs -s before"  # store the baseline
+# ...edit, rebuild...
+make profile PROFFLAGS="-f graph_dfs -d before"  # per-function instruction delta
+```
+
+The comparison is done by `tools/cgdiff.c`, a small standalone C program that
+reads the callgrind output format directly and subtracts the two per-function
+tables; `make` builds it as `bin/cgdiff` on demand.
+
+Always profile at `-O2`. At `-O0` the profile is dominated by accessors that
+the real build inlines away: measured on `graph_dfs`, 207M instructions at
+`-O0` against 64M at `-O2`, with `st_heads`, `st_to`, `st_w` and `use_in_star`
+disappearing entirely from the optimized profile.
+
+Remember that `Ir` is an instruction count, not time: it ignores memory
+latency and mispredicted branches. `-c` and `-B` add those, and the run
+summary reports cache misses and misprediction rate alongside.
+
 ## Project layout
 
 ```
 include/     public headers (Graph.h, Importer.h, Stack.h, Queue.h)
 src/         library sources (graph, list, queue, stack, importer) + main.c demo
+tools/       developer tooling (profile.sh, cgdiff.c)
 bin/         built library (libgraph.a) and demo binary
 build/       object files
-*.dot        sample graphs (europe_roads, twitch, …) and exports
+res/         sample graphs read by graph_import_dot (europe_roads, twitch, …)
+out/         everything generated: DOT/PNG exports and out/profile/ callgrind data
 ```
 
 ## Status
