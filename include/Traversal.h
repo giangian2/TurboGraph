@@ -2,6 +2,7 @@
 #define TRAVERSAL_H
 
 #include "../include/Graph.h"
+#include <stddef.h>
 
 /* ---- traversals -------------------------------------------------------- */
 
@@ -19,12 +20,27 @@ typedef struct
     int* order;
     int* parent;
     int* dist;
-    int  count; // numero totale di vertici raggiunti
-    int  n;     // numero totale di vertific del grafo
+    int  count; 
+    int  n;     
 } Traversal;
+
+/**
+ * Result of a connected components finding algorithm.
+ * 
+ *   node_ids   an array of all the nodes id present in the component
+ *   size       size (number of nodes) of the component
+ */
+typedef struct
+{
+    int* node_ids; 
+    size_t size;
+}Component;
+
 
 Traversal* graph_bfs(const Graph* g, int source);
 Traversal* graph_dfs(const Graph* g, int source);
-void       traversal_free(Traversal* t);
+void       traversal_cleanup(Traversal** t);
+
+#define AUTO_FREE_TRAVERSAL __attribute__((cleanup(traversal_cleanup))) Traversal*
 
 #endif /* TRAVERSAL_H */
