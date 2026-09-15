@@ -9,18 +9,7 @@
  * I percorsi sono relativi alla radice del progetto: esegui con `make run`. */
 #define INPUT_DOT "res/BayAreaUs.dot"
 #define OUTPUT_DOT "out/bayarea.dot"
-
-/* Stampa il cammino minimo source -> v risalendo parent[] a ritroso.
- * Ricorsiva: prima stampa il cammino fino al padre, poi v stesso. */
-static void print_path(const Traversal* t, int v)
-{
-    if (t->parent[v] != -1)
-    {
-        print_path(t, t->parent[v]);
-        printf(" -> ");
-    }
-    printf("%d", v);
-}
+#define EXAMPLE_NODE 7
 
 int main(void)
 {
@@ -31,31 +20,23 @@ int main(void)
         fprintf(stderr, "import di " INPUT_DOT " fallito\n");
         return 1;
     }
-    printf("\nimportato " INPUT_DOT ": %d vertici, %zu archi\n", roads->n, roads->m);
+    printf("\nImported " INPUT_DOT ": %d vertex, %zu arcs\n", roads->n, roads->m);
 
-    AUTO_FREE_TRAVERSAL rt = graph_dfs(roads, 7);
+    AUTO_FREE_TRAVERSAL rt = graph_dfs(roads, EXAMPLE_NODE);
     if (!rt)
     {
-        fprintf(stderr, "BFS su " INPUT_DOT " fallita\n");
+        fprintf(stderr, "Node Search on " INPUT_DOT " failed\n");
         graph_free(roads);
         return 1;
     }
-    printf("BFS da 7: raggiunti %d vertici su %d\n", rt->count, rt->n);
-
-    if (rt->count > 1)
-    {
-        int far = rt->order[rt->count - 1];
-        printf("cammino minimo 7 -> %d (%d archi): ", far, rt->dist[far]);
-        print_path(rt, far);
-        printf("\n");
-    }
+    printf("Node Serch from %d: reached %d vertex of %d\n", EXAMPLE_NODE, rt->count, rt->n);
 
     int rc = graph_export_dot(roads, rt, OUTPUT_DOT);
     if (rc != GRAPH_OK)
-        fprintf(stderr, "export DOT fallito (%d)\n", rc);
+        fprintf(stderr, "export DOT failed (%d)\n", rc);
     else
-        printf("Scritto " OUTPUT_DOT " -- renderizza con:\n"
-               "  dot -Tpng " OUTPUT_DOT " -o out/twitch_bfs.png\n");
+        printf("Wrote " OUTPUT_DOT " -- render with:\n"
+               "  dot -Tsvg " OUTPUT_DOT " -o your_output_name.svg\n");
 
     graph_free(roads);
     return 0;

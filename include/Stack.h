@@ -38,9 +38,8 @@ void  stack__free(void* s);
 #define stack_is_empty(s) (stack_len(s) == 0)
 
 /* Pushes v onto the stack. false if full. */
-#define stack_push(s, v)                                                                         \
-    (stack__hdr(s)->count < stack__hdr(s)->cap ? ((s)[stack__hdr(s)->count++] = (v), true)        \
-                                                : false)
+#define stack_push(s, v)                                                                           \
+    (stack__hdr(s)->count < stack__hdr(s)->cap ? ((s)[stack__hdr(s)->count++] = (v), true) : false)
 
 /* Pops and returns the top element. Precondition: !stack_is_empty(s),
  * same as arrpop() in stb_ds.h -- no bounds check here, caller's job. */

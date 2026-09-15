@@ -1,4 +1,5 @@
 #include "../include/FibHeap.h"
+#include "../include/Debug.h"
 #include <stdlib.h>
 
 /* Upper bound on a node's degree: a node of degree k roots a subtree of at
@@ -45,55 +46,19 @@ FibHeap* createFibHeap(size_t capacity)
     if (h == NULL || id == NULL || weight == NULL || parent == NULL || child == NULL ||
         left == NULL || right == NULL || degree == NULL || mark == NULL || pos == NULL)
     {
-        if (h)
-        {
-            free(h);
-        }
-
-        if (id)
-        {
-            free(id);
-        }
-
-        if (weight)
-        {
-            free(weight);
-        }
-
-        if (parent)
-        {
-            free(parent);
-        }
-
-        if (child)
-        {
-            free(child);
-        }
-
-        if (left)
-        {
-            free(left);
-        }
-
-        if (right)
-        {
-            free(right);
-        }
-
-        if (degree)
-        {
-            free(degree);
-        }
-
-        if (mark)
-        {
-            free(mark);
-        }
-
-        if (pos)
-        {
-            free(pos);
-        }
+        LOG_ERROR("allocation failed (capacity=%zu)", capacity);
+        /* free(NULL) is legal: this frees only whichever allocations
+         * actually succeeded, no per-pointer NULL check needed. */
+        free(h);
+        free(id);
+        free(weight);
+        free(parent);
+        free(child);
+        free(left);
+        free(right);
+        free(degree);
+        free(mark);
+        free(pos);
         return NULL;
     }
 
@@ -126,6 +91,7 @@ FibHeap* createFibHeap(size_t capacity)
     h->rootBuf         = NULL;
     h->rootBufCapacity = 0;
 
+    LOG_DEBUG("FibHeap created (capacity=%zu)", capacity);
     return h;
 }
 
@@ -135,22 +101,26 @@ int fibInsert(FibHeap* h, int id, double weight)
 {
     if (h == NULL || id < 0)
     {
+        LOG_ERROR("invalid argument (h=%p, id=%d)", (void*)h, id);
         return FIBHEAP_ERR;
     }
 
     if (expandPos(h, (size_t)id) != FIBHEAP_OK)
     {
+        LOG_ERROR("expandPos failed for id %d", id);
         return FIBHEAP_ERR;
     }
 
     if (h->pos[id] != -1)
     {
+        LOG_ERROR("duplicate id %d", id);
         return FIBHEAP_ERR; // duplicate ids are not supported
     }
 
     int idx = allocNode(h);
     if (idx == -1)
     {
+        LOG_ERROR("allocNode failed for id %d", id);
         return FIBHEAP_ERR; // arena expansion failed
     }
 
@@ -172,6 +142,7 @@ int fibInsert(FibHeap* h, int id, double weight)
 
     h->pos[id] = idx;
     h->size++;
+    LOG_DEBUG("inserted id=%d weight=%g, size=%zu", id, weight, h->size);
     return FIBHEAP_OK;
 }
 
@@ -183,6 +154,8 @@ int fibExtractMin(FibHeap* h, int* outId, double* outWeight)
 {
     if (h == NULL || h->size == 0 || outId == NULL)
     {
+        LOG_ERROR("invalid argument or empty heap (h=%p, size=%zu, outId=%p)", (void*)h,
+                  h ? h->size : (size_t)0, (void*)outId);
         return FIBHEAP_ERR;
     }
 
@@ -224,6 +197,7 @@ int fibExtractMin(FibHeap* h, int* outId, double* outWeight)
         consolidate(h);
     }
 
+    LOG_DEBUG("extracted min id=%d, %zu elements left", *outId, h->size);
     return FIBHEAP_OK;
 }
 
@@ -235,11 +209,13 @@ int fibDecreaseKey(FibHeap* h, int id, double newWeight)
 {
     if (h == NULL || id < 0)
     {
+        LOG_ERROR("invalid argument (h=%p, id=%d)", (void*)h, id);
         return FIBHEAP_ERR;
     }
 
     if ((size_t)id >= h->posCapacity || h->pos[id] == -1)
     {
+        LOG_ERROR("id %d not in heap", id);
         return FIBHEAP_ERR; // id is not currently in the heap
     }
 
@@ -247,6 +223,7 @@ int fibDecreaseKey(FibHeap* h, int id, double newWeight)
 
     if (newWeight > h->weight[idx])
     {
+        LOG_ERROR("newWeight %g > current weight %g for id %d", newWeight, h->weight[idx], id);
         return FIBHEAP_ERR; // decreaseKey only ever lowers the weight
     }
 
@@ -264,6 +241,7 @@ int fibDecreaseKey(FibHeap* h, int id, double newWeight)
         h->min = idx;
     }
 
+    LOG_DEBUG("decreased key of id %d to %g", id, newWeight);
     return FIBHEAP_OK;
 }
 
@@ -274,6 +252,7 @@ void freeFibHeap(FibHeap* h)
         return;
     }
 
+    LOG_DEBUG("freeing FibHeap (size=%zu, capacity=%zu)", h->size, h->capacity);
     free(h->id);
     free(h->weight);
     free(h->parent);
@@ -312,6 +291,7 @@ static int expandPos(FibHeap* h, size_t neededIndex)
     int* newPos = (int*)realloc(h->pos, sizeof(int) * newPosCapacity);
     if (newPos == NULL)
     {
+        LOG_ERROR("realloc failed growing pos[] to %zu entries", newPosCapacity);
         return FIBHEAP_ERR;
     }
 
@@ -322,6 +302,7 @@ static int expandPos(FibHeap* h, size_t neededIndex)
 
     h->pos         = newPos;
     h->posCapacity = newPosCapacity;
+    LOG_DEBUG("pos[] grown to %zu entries", newPosCapacity);
     return FIBHEAP_OK;
 }
 
@@ -387,10 +368,12 @@ static int expandArena(FibHeap* h)
     if (!newId || !newWeight || !newParent || !newChild || !newLeft || !newRight || !newDegree ||
         !newMark)
     {
+        LOG_ERROR("realloc failed growing arena to capacity %zu", newCapacity);
         return FIBHEAP_ERR;
     }
 
     h->capacity = newCapacity;
+    LOG_DEBUG("arena grown to capacity %zu", newCapacity);
     return FIBHEAP_OK;
 }
 
@@ -413,6 +396,7 @@ static int ensureRootBuf(FibHeap* h, size_t needed)
     int* newBuf = (int*)realloc(h->rootBuf, sizeof(int) * newCapacity);
     if (newBuf == NULL)
     {
+        LOG_ERROR("realloc failed growing rootBuf to %zu entries", newCapacity);
         return FIBHEAP_ERR;
     }
 
@@ -453,6 +437,7 @@ static int releaseNode(FibHeap* h, int idx)
         int*   newFree     = (int*)realloc(h->freeList, sizeof(int) * newCapacity);
         if (newFree == NULL)
         {
+            LOG_ERROR("realloc failed growing freeList to %zu entries", newCapacity);
             return FIBHEAP_ERR; // idx just won't be recycled; the heap stays consistent
         }
         h->freeList     = newFree;

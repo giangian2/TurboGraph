@@ -1,4 +1,5 @@
 #include "../include/DHeap.h"
+#include "../include/Debug.h"
 #include <stdlib.h>
 
 /* Forward declarations: the static helpers are implemented further down
@@ -26,25 +27,13 @@ DHeap* createDHeap(size_t d, size_t capacity)
 
     if (heap == NULL || id == NULL || weight == NULL || pos == NULL)
     {
-        if (heap)
-        {
-            free(heap);
-        }
-
-        if (id)
-        {
-            free(id);
-        }
-
-        if (weight)
-        {
-            free(weight);
-        }
-
-        if (pos)
-        {
-            free(pos);
-        }
+        LOG_ERROR("allocation failed (d=%zu, capacity=%zu)", d, capacity);
+        /* free(NULL) is legal: this frees only whichever allocations
+         * actually succeeded, no per-pointer NULL check needed. */
+        free(heap);
+        free(id);
+        free(weight);
+        free(pos);
         return NULL;
     }
 
@@ -61,6 +50,7 @@ DHeap* createDHeap(size_t d, size_t capacity)
     heap->pos         = pos;
     heap->posCapacity = capacity;
 
+    LOG_DEBUG("DHeap created (d=%zu, capacity=%zu)", d, capacity);
     return heap;
 }
 
@@ -73,11 +63,13 @@ int decreaseKey(DHeap* h, int id, double newWeight)
 {
     if (h == NULL || id < 0)
     {
+        LOG_ERROR("invalid argument (h=%p, id=%d)", (void*)h, id);
         return DHEAP_ERR;
     }
 
     if ((size_t)id >= h->posCapacity || h->pos[id] == -1)
     {
+        LOG_ERROR("id %d not in heap", id);
         return DHEAP_ERR; // id is not currently in the heap
     }
 
@@ -85,11 +77,13 @@ int decreaseKey(DHeap* h, int id, double newWeight)
 
     if (newWeight > h->weight[index])
     {
+        LOG_ERROR("newWeight %g > current weight %g for id %d", newWeight, h->weight[index], id);
         return DHEAP_ERR; // decreaseKey only ever lowers the weight
     }
 
     h->weight[index] = newWeight;
     moveUp(h, index);
+    LOG_DEBUG("decreased key of id %d to %g", id, newWeight);
     return DHEAP_OK;
 }
 
@@ -100,6 +94,8 @@ int extractMin(DHeap* h, int* outId, double* outWeight)
 {
     if (h == NULL || h->size == 0 || outId == NULL)
     {
+        LOG_ERROR("invalid argument or empty heap (h=%p, size=%zu, outId=%p)", (void*)h,
+                  h ? h->size : (size_t)0, (void*)outId);
         return DHEAP_ERR;
     }
 
@@ -120,6 +116,7 @@ int extractMin(DHeap* h, int* outId, double* outWeight)
         moveDwn(h, 0);
     }
 
+    LOG_DEBUG("extracted min id=%d, %zu elements left", *outId, h->size);
     return DHEAP_OK;
 }
 
@@ -130,16 +127,19 @@ int insert(DHeap* h, int id, double weight)
 {
     if (h == NULL || id < 0)
     {
+        LOG_ERROR("invalid argument (h=%p, id=%d)", (void*)h, id);
         return DHEAP_ERR;
     }
 
     if (expandPos(h, (size_t)id) != DHEAP_OK)
     {
+        LOG_ERROR("expandPos failed for id %d", id);
         return DHEAP_ERR;
     }
 
     if (h->pos[id] != -1)
     {
+        LOG_ERROR("duplicate id %d", id);
         return DHEAP_ERR; // duplicate ids are not supported
     }
 
@@ -148,6 +148,7 @@ int insert(DHeap* h, int id, double weight)
         expandDHeap(h);
         if (h->size == h->capacity)
         {
+            LOG_ERROR("expandDHeap failed to grow past capacity %zu", h->capacity);
             return DHEAP_ERR; // expandDHeap left capacity unchanged: realloc failed
         }
     }
@@ -159,6 +160,7 @@ int insert(DHeap* h, int id, double weight)
     h->size++;
 
     moveUp(h, index);
+    LOG_DEBUG("inserted id=%d weight=%g, size=%zu", id, weight, h->size);
     return DHEAP_OK;
 }
 
@@ -169,6 +171,7 @@ void freeDHeap(DHeap* h)
         return;
     }
 
+    LOG_DEBUG("freeing DHeap (size=%zu, capacity=%zu)", h->size, h->capacity);
     free(h->id);
     free(h->weight);
     free(h->pos);
@@ -199,6 +202,7 @@ static int expandPos(DHeap* h, size_t neededIndex)
     int* newPos = (int*)realloc(h->pos, sizeof(int) * newPosCapacity);
     if (newPos == NULL)
     {
+        LOG_ERROR("realloc failed growing pos[] to %zu entries", newPosCapacity);
         return DHEAP_ERR;
     }
 
@@ -209,6 +213,7 @@ static int expandPos(DHeap* h, size_t neededIndex)
 
     h->pos         = newPos;
     h->posCapacity = newPosCapacity;
+    LOG_DEBUG("pos[] grown to %zu entries", newPosCapacity);
     return DHEAP_OK;
 }
 
@@ -238,10 +243,12 @@ static void expandDHeap(DHeap* h)
 
     if (!newId || !newWeight)
     {
+        LOG_ERROR("realloc failed growing DHeap to capacity %zu", newCapacity);
         return;
     }
 
     h->capacity = newCapacity;
+    LOG_DEBUG("DHeap grown to capacity %zu", newCapacity);
 }
 
 /* Index arithmetic for a D-ary heap laid out level-order in a flat array:

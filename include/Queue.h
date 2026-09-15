@@ -41,7 +41,7 @@ size_t queue__pop_index(QueueHdr* hdr);
 #define queue_is_empty(q) (queue_len(q) == 0)
 
 /* Enqueues v. false if full. */
-#define queue_enqueue(q, v)                                                                       \
+#define queue_enqueue(q, v)                                                                        \
     (queue__hdr(q)->count < queue__hdr(q)->cap                                                     \
          ? ((q)[(queue__hdr(q)->head + queue__hdr(q)->count) % queue__hdr(q)->cap] = (v),          \
             queue__hdr(q)->count++, true)                                                          \

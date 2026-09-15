@@ -7,6 +7,7 @@
  * ottenere n corretto e' aver gia' visto tutti gli id.
  */
 #include "../include/Importer.h"
+#include "../include/Debug.h"
 #include "../include/Graph.h"
 #include <ctype.h>
 #include <limits.h>
@@ -33,7 +34,10 @@ static bool edgebuf_push(EdgeBuf* b, int u, int v, double w)
         size_t     new_cap = b->cap ? b->cap * 2 : 64;
         GraphEdge* tmp     = realloc(b->data, new_cap * sizeof *tmp);
         if (!tmp)
+        {
+            LOG_ERROR("realloc failed growing edge buffer to %zu entries", new_cap);
             return false;
+        }
         b->data = tmp;
         b->cap  = new_cap;
     }
@@ -76,11 +80,19 @@ static bool parse_uint(const char** p, int* out)
 Graph* graph_import_dot(const char* path, GraphRepr repr)
 {
     if (!path)
+    {
+        LOG_ERROR("NULL path");
         return NULL;
+    }
 
     FILE* f = fopen(path, "r");
     if (!f)
+    {
+        LOG_ERROR("fopen failed for %s", path);
         return NULL;
+    }
+
+    LOG_DEBUG("importing DOT file %s (repr=%d)", path, repr);
 
     EdgeBuf edges          = {NULL, 0, 0};
     int     max_id         = -1; /* id di vertice piu' alto incontrato    */
@@ -165,9 +177,12 @@ Graph* graph_import_dot(const char* path, GraphRepr repr)
 
     if (!ok || max_id < 0)
     {
+        LOG_ERROR("import of %s failed (ok=%d, max_id=%d)", path, ok, max_id);
         free(edges.data);
         return NULL;
     }
+
+    LOG_DEBUG("parsed %zu edges from %s, max_id=%d", edges.count, path, max_id);
 
     Graph* g = graph_from_edges(max_id + 1, directed, edges.data, edges.count, repr);
     free(edges.data);
