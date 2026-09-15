@@ -72,6 +72,25 @@ struct GraphOps
     void (*destroy)(Graph* g);
 };
 
+/*
+ * Map of the block. Byte offsets from here, not pointers.
+ * 0 = segment absent: no segment can start at 0, the header lives there.
+ */
+typedef struct
+{
+    size_t bytes;  // total block size: how much to copy
+    size_t n_arcs; // physical arcs = length of to/w (and of from/rw)
+    // OUT
+    size_t o_heads;
+    size_t o_to;
+    size_t o_w;
+    // IN (0 when the graph is undirected)
+    size_t o_rheads;
+    size_t o_from;
+    size_t o_rw;
+
+} Star;
+
 struct Graph
 {
     int             n; /* number of vertices                          */
