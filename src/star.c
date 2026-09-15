@@ -16,6 +16,7 @@
  * nothing to relocate. A host pointer copied to a GPU would be garbage;
  * an offset would not. See star_init_from_edges() below for the layout.
  */
+#include "../include/Debug.h"
 #include "../include/Graph.h"
 #include <stdlib.h>
 
@@ -328,7 +329,14 @@ int star_init_from_edges(Graph* g, const GraphEdge* edges, size_t m)
     // pass assumes heads[] (and rheads[]) are already zeroed.
     char* blk = calloc(1, off);
     if (!blk)
+    {
+        LOG_ERROR("allocation failed for Star block (%zu bytes, n=%d, arcs=%zu)", off, tot_nodes,
+                  tot_arcs);
         return GRAPH_ERR_ALLOC;
+    }
+
+    LOG_DEBUG("Star built: n=%d, logical_edges=%zu, physical_arcs=%zu, bytes=%zu, back=%d",
+              tot_nodes, m, tot_arcs, off, back);
 
     // Header: offsets, not pointers. No absolute address lives in the block,
     // so copying it elsewhere (device, file, network) needs no relocation.

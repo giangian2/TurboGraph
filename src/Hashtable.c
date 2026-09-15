@@ -1,4 +1,5 @@
 #include "../include/Hashtable.h"
+#include "../include/Debug.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -89,6 +90,7 @@ static bool rehash(HashTable* table, size_t new_capacity)
 
     if (!new_keys || !new_values || !new_state)
     {
+        LOG_ERROR("allocation failed rehashing to capacity %zu", new_capacity);
         free(new_keys);
         free(new_values);
         free(new_state);
@@ -119,6 +121,8 @@ static bool rehash(HashTable* table, size_t new_capacity)
     free(old_keys);
     free(old_values);
     free(old_state);
+    LOG_DEBUG("rehashed from %zu to %zu slots (%zu entries)", old_capacity, new_capacity,
+              table->count);
     return true;
 }
 
@@ -133,13 +137,19 @@ static bool maybe_grow(HashTable* table)
 HashTable* createHashTable(size_t key_size, size_t value_size, size_t initial_capacity)
 {
     if (key_size == 0 || value_size == 0)
+    {
+        LOG_ERROR("invalid key/value size (key_size=%zu, value_size=%zu)", key_size, value_size);
         return NULL;
+    }
     if (initial_capacity == 0)
         initial_capacity = HT_DEFAULT_CAPACITY;
 
     HashTable* table = malloc(sizeof(HashTable));
     if (!table)
+    {
+        LOG_ERROR("allocation failed for HashTable header");
         return NULL;
+    }
 
     table->key_size   = key_size;
     table->value_size = value_size;
@@ -152,6 +162,7 @@ HashTable* createHashTable(size_t key_size, size_t value_size, size_t initial_ca
 
     if (!table->keys || !table->values || !table->state)
     {
+        LOG_ERROR("allocation failed for HashTable storage (capacity=%zu)", initial_capacity);
         free(table->keys);
         free(table->values);
         free(table->state);
@@ -159,6 +170,8 @@ HashTable* createHashTable(size_t key_size, size_t value_size, size_t initial_ca
         return NULL;
     }
 
+    LOG_DEBUG("HashTable created (key_size=%zu, value_size=%zu, capacity=%zu)", key_size,
+              value_size, initial_capacity);
     return table;
 }
 
@@ -166,6 +179,7 @@ void destroyHashTable(HashTable* table)
 {
     if (!table)
         return;
+    LOG_DEBUG("destroying HashTable (count=%zu, capacity=%zu)", table->count, table->capacity);
     free(table->keys);
     free(table->values);
     free(table->state);
@@ -175,7 +189,10 @@ void destroyHashTable(HashTable* table)
 bool put(HashTable* table, const void* key, const void* value)
 {
     if (!table || !key || !value)
+    {
+        LOG_ERROR("invalid argument (table=%p, key=%p, value=%p)", (void*)table, key, value);
         return false;
+    }
 
     size_t existing = find_slot(table, key);
     if (existing != table->capacity)
@@ -185,7 +202,11 @@ bool put(HashTable* table, const void* key, const void* value)
     }
 
     if (!maybe_grow(table))
+    {
+        LOG_ERROR("grow failed, put refused (count=%zu, capacity=%zu)", table->count,
+                  table->capacity);
         return false;
+    }
     raw_insert(table, key, value);
     return true;
 }
@@ -193,7 +214,10 @@ bool put(HashTable* table, const void* key, const void* value)
 void* get(HashTable* table, const void* key)
 {
     if (!table || !key)
+    {
+        LOG_ERROR("invalid argument (table=%p, key=%p)", (void*)table, key);
         return NULL;
+    }
     size_t index = find_slot(table, key);
     return index == table->capacity ? NULL : value_at(table, index);
 }
@@ -201,7 +225,10 @@ void* get(HashTable* table, const void* key)
 bool ht_remove(HashTable* table, const void* key)
 {
     if (!table || !key)
+    {
+        LOG_ERROR("invalid argument (table=%p, key=%p)", (void*)table, key);
         return false;
+    }
 
     size_t index = find_slot(table, key);
     if (index == table->capacity)
@@ -210,5 +237,7 @@ bool ht_remove(HashTable* table, const void* key)
     table->state[index] = SLOT_DELETED;
     table->count--;
     table->tombstones++;
+    LOG_DEBUG("removed key at slot %zu (count=%zu, tombstones=%zu)", index, table->count,
+              table->tombstones);
     return true;
 }

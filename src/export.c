@@ -1,4 +1,5 @@
 #include "../include/Export.h"
+#include "../include/Debug.h"
 #include "../include/Graph.h"
 #include <stdio.h>
 
@@ -17,11 +18,21 @@ static bool is_tree_edge(const Graph* g, const Traversal* t, int u, int v)
 int graph_export_dot(const Graph* g, const Traversal* t, const char* path)
 {
     if (!g || !path || (t && t->n != g->n))
+    {
+        LOG_ERROR("invalid argument (g=%p, path=%p, t=%p)", (const void*)g, (const void*)path,
+                  (const void*)t);
         return GRAPH_ERR_ARG;
+    }
 
     FILE* f = fopen(path, "w");
     if (!f)
+    {
+        LOG_ERROR("fopen failed for %s", path);
         return GRAPH_ERR_ARG;
+    }
+
+    LOG_DEBUG("exporting Graph to %s (n=%d, m=%zu, with_traversal=%d)", path, g->n, g->m,
+              t != NULL);
 
     /* DOT distinguishes directed graphs (digraph, "->" edges) from undirected ones (graph, "--") */
     const char* edge_op = g->directed ? "->" : "--";
@@ -63,5 +74,8 @@ int graph_export_dot(const Graph* g, const Traversal* t, const char* path)
     }
 
     fprintf(f, "}\n");
-    return fclose(f) == 0 ? GRAPH_OK : GRAPH_ERR_ARG;
+    int rc = fclose(f) == 0 ? GRAPH_OK : GRAPH_ERR_ARG;
+    if (rc != GRAPH_OK)
+        LOG_ERROR("fclose failed for %s", path);
+    return rc;
 }

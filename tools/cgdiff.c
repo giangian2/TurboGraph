@@ -114,7 +114,7 @@ typedef struct
 typedef struct
 {
     Entry* slot;
-    size_t cap;   /* power of two */
+    size_t cap; /* power of two */
     size_t count;
 } Table;
 
@@ -259,13 +259,13 @@ static uint64_t parse(const char* path, Table* tbl, bool is_after)
         exit(1);
     }
 
-    NameTable files = {0}, funcs = {0};
-    const char* cur_file = "???";
-    const char* cur_func = "???";
-    int         npos     = 1;  /* "positions: line" is the default */
-    int         ircol    = 0;
+    NameTable   files = {0}, funcs = {0};
+    const char* cur_file       = "???";
+    const char* cur_func       = "???";
+    int         npos           = 1; /* "positions: line" is the default */
+    int         ircol          = 0;
     bool        skip_next_cost = false; /* the line right after calls= */
-    uint64_t    total    = 0;
+    uint64_t    total          = 0;
 
     char*   line = NULL;
     size_t  cap  = 0;
@@ -280,8 +280,8 @@ static uint64_t parse(const char* path, Table* tbl, bool is_after)
 
         /* A cost line starts with a position: a digit, +, - or *. Every
          * other record starts with a letter. */
-        if ((line[0] >= '0' && line[0] <= '9') || line[0] == '+' || line[0] == '-'
-            || line[0] == '*')
+        if ((line[0] >= '0' && line[0] <= '9') || line[0] == '+' || line[0] == '-' ||
+            line[0] == '*')
         {
             if (skip_next_cost)
             {
@@ -325,7 +325,7 @@ static uint64_t parse(const char* path, Table* tbl, bool is_after)
 
         if (eq && (!co || eq < co))
         {
-            *eq = '\0';
+            *eq             = '\0';
             const char* key = line;
             char*       arg = eq + 1;
             while (*arg == ' ')
@@ -339,8 +339,7 @@ static uint64_t parse(const char* path, Table* tbl, bool is_after)
                 if (n && strcmp(key, "fl") == 0)
                     cur_file = n;
             }
-            else if (strcmp(key, "cfl") == 0 || strcmp(key, "cfi") == 0
-                     || strcmp(key, "cfe") == 0)
+            else if (strcmp(key, "cfl") == 0 || strcmp(key, "cfi") == 0 || strcmp(key, "cfe") == 0)
             {
                 record_name(arg, &files); /* callee side: definition only */
             }
@@ -364,7 +363,7 @@ static uint64_t parse(const char* path, Table* tbl, bool is_after)
 
         if (co)
         {
-            *co = '\0';
+            *co       = '\0';
             char* arg = co + 1;
             while (*arg == ' ')
                 arg++;
@@ -525,8 +524,7 @@ int main(int argc, char** argv)
         for (size_t i = 0; i < shown; i++)
         {
             char b1[32], b2[32], b3[32], nm[256];
-            printf("   %-*s %14s %14s %14s\n", NAME_WIDTH,
-                   short_name(rows[i].name, nm, sizeof nm),
+            printf("   %-*s %14s %14s %14s\n", NAME_WIDTH, short_name(rows[i].name, nm, sizeof nm),
                    commas(rows[i].before, b1, sizeof b1), commas(rows[i].after, b2, sizeof b2),
                    signed_commas(rows[i].delta, b3, sizeof b3));
         }

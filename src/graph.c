@@ -3,6 +3,7 @@
  * Nothing here knows how any representation works.
  */
 #include "../include/Graph.h"
+#include "../include/Debug.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -18,7 +19,10 @@ static Graph* shell(int n, bool directed, GraphRepr repr)
 {
     Graph* g = malloc(sizeof(Graph));
     if (!g)
+    {
+        LOG_ERROR("allocation failed for Graph shell (n=%d)", n);
         return NULL;
+    }
     g->n        = n;
     g->m        = 0;
     g->directed = directed;
@@ -31,7 +35,10 @@ static Graph* shell(int n, bool directed, GraphRepr repr)
 Graph* graph_create(int n, bool directed, GraphRepr repr)
 {
     if (n <= 0)
+    {
+        LOG_ERROR("invalid vertex count (n=%d)", n);
         return NULL;
+    }
     Graph* g = shell(n, directed, repr);
     if (!g)
         return NULL;
@@ -51,31 +58,41 @@ Graph* graph_create(int n, bool directed, GraphRepr repr)
     }
     if (rc != GRAPH_OK)
     {
+        LOG_ERROR("representation init failed (repr=%d, rc=%d)", repr, rc);
         free(g);
         return NULL;
     }
+    LOG_DEBUG("Graph created (n=%d, directed=%d, repr=%d)", n, directed, repr);
     return g;
 }
 
 Graph* graph_from_edges(int n, bool directed, const GraphEdge* edges, size_t m, GraphRepr repr)
 {
     if (n <= 0 || (m > 0 && !edges))
+    {
+        LOG_ERROR("invalid argument (n=%d, edges=%p, m=%zu)", n, (const void*)edges, m);
         return NULL;
+    }
     for (size_t k = 0; k < m; k++)
     {
         const GraphEdge* e = &edges[k];
         if (e->u < 0 || e->u >= n || e->v < 0 || e->v >= n || e->w == 0.0)
+        {
+            LOG_ERROR("invalid edge at index %zu (u=%d, v=%d, w=%g)", k, e->u, e->v, e->w);
             return NULL;
+        }
     }
+
+    LOG_DEBUG("building Graph from %zu edges (n=%d, directed=%d, repr=%d)", m, n, directed, repr);
 
     if (repr == GRAPH_STAR)
     {
-
         Graph* g = shell(n, directed, repr);
         if (!g)
             return NULL;
         if (star_init_from_edges(g, edges, m) != GRAPH_OK)
         {
+            LOG_ERROR("star_init_from_edges failed (n=%d, m=%zu)", n, m);
             free(g);
             return NULL;
         }
@@ -89,6 +106,7 @@ Graph* graph_from_edges(int n, bool directed, const GraphEdge* edges, size_t m, 
     {
         if (g->ops->add_edge(g, edges[k].u, edges[k].v, edges[k].w) != GRAPH_OK)
         {
+            LOG_ERROR("add_edge failed at index %zu (u=%d, v=%d)", k, edges[k].u, edges[k].v);
             graph_free(g);
             return NULL;
         }
@@ -100,6 +118,7 @@ void graph_free(Graph* g)
 {
     if (!g)
         return;
+    LOG_DEBUG("freeing Graph (n=%d, m=%zu, repr=%d)", g->n, g->m, g->repr);
     if (g->ops)
         g->ops->destroy(g);
     free(g);
@@ -108,14 +127,20 @@ void graph_free(Graph* g)
 int graph_add_edge(Graph* g, int u, int v, double w)
 {
     if (!g || !vertex_ok(g, u) || !vertex_ok(g, v) || w == 0.0)
+    {
+        LOG_ERROR("invalid argument (u=%d, v=%d, w=%g)", u, v, w);
         return GRAPH_ERR_ARG;
+    }
     return g->ops->add_edge(g, u, v, w);
 }
 
 int graph_remove_edge(Graph* g, int u, int v)
 {
     if (!g || !vertex_ok(g, u) || !vertex_ok(g, v))
+    {
+        LOG_ERROR("invalid argument (u=%d, v=%d)", u, v);
         return GRAPH_ERR_ARG;
+    }
     return g->ops->remove_edge(g, u, v);
 }
 

@@ -1,4 +1,5 @@
 #include "../include/Sorting.h"
+#include "../include/Debug.h"
 #include "../include/Graph.h"
 
 /* Hoare-scheme partition (NOT Lomuto): the pivot value is edges[p].w and is
@@ -13,10 +14,10 @@
  * e_minus/e_plus can never scan past the p/q bounds. */
 int partition(GraphEdge* edges, int count, int p, int q)
 {
-
     // Handle edge cases
     if (p < 0 || q >= count)
     {
+        LOG_ERROR("invalid range (p=%d, q=%d, count=%d)", p, q, count);
         return -1;
     }
 
@@ -58,6 +59,8 @@ void QuickSort(GraphEdge* edges, int count, int p, int q)
         return;
     }
 
+    LOG_DEBUG("sorting range [%d, %d]", p, q);
+
     int pivot_position = partition(edges, count, p, q);
 
     /* Because partition() uses the Hoare scheme, pivot_position is only a
@@ -71,26 +74,14 @@ void QuickSort(GraphEdge* edges, int count, int p, int q)
     QuickSort(edges, count, pivot_position + 1, q);
 }
 
+/*
+ * Same algorithm as QuickSort() above -- same partition(), same split
+ * point, same recursion -- kept under its own name because Kruskal's MST
+ * callers sort their edge list through it; there is nothing MST-specific
+ * about the sort itself, so it is a thin alias rather than a second copy
+ * of the recursion to keep in sync.
+ */
 void QuickSortKruskalMST(GraphEdge* edges, int count, int p, int q)
 {
-    if (p >= q)
-    {
-        return;
-    }
-
-    int pivot_position = partition(edges, count, p, q);
-
-    if (pivot_position > p)
-    {
-        QuickSortKruskalMST(edges, count, p, pivot_position);
-    }
-
-    // In this point we have piovt_position = p
-    // printf("MST QICK FIRST EDGE:  [%i,%i].cost=%f \n",edges[p].u, edges[p].v, edges[p].w);
-
-    if (pivot_position < q)
-    {
-        // If we reach this point, than  p < pivot_position < q
-        QuickSortKruskalMST(edges, count, pivot_position + 1, q);
-    }
+    QuickSort(edges, count, p, q);
 }

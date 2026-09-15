@@ -8,6 +8,7 @@
  * The only dynamic representation: add/remove are cheap, but in-neighbor
  * queries on directed graphs must scan every chain, O(n+m).
  */
+#include "../include/Debug.h"
 #include "../include/Graph.h"
 #include <stdlib.h>
 
@@ -35,7 +36,10 @@ static int push(Graph* g, int u, int v, double w)
 {
     EdgeNode* nd = malloc(sizeof *nd);
     if (!nd)
+    {
+        LOG_ERROR("allocation failed for EdgeNode (u=%d, v=%d)", u, v);
         return GRAPH_ERR_ALLOC;
+    }
     nd->to      = v;
     nd->w       = w;
     nd->next    = heads(g)[u];
@@ -214,7 +218,11 @@ int list_init(Graph* g)
 {
     g->data = calloc((size_t)g->n, sizeof(EdgeNode*));
     if (!g->data)
+    {
+        LOG_ERROR("allocation failed for adjacency list heads (n=%d)", g->n);
         return GRAPH_ERR_ALLOC;
+    }
     g->ops = &list_ops;
+    LOG_DEBUG("adjacency list initialized (n=%d)", g->n);
     return GRAPH_OK;
 }

@@ -1,19 +1,23 @@
 #include "../include/Traversal.h"
+#include "../include/Debug.h"
 #include "../include/Graph.h"
 #include "../include/Queue.h"
 #include "../include/Stack.h"
 #include <stdio.h>
 #include <stdlib.h>
 
-
-static Component* undirected_find_connected_components(const Graph* g){
-    for(int c = 0; c < g->n; c++){
-        Traversal* trav = graph_dfs(g, c);
+static Component* undirected_find_connected_components(const Graph* g)
+{
+    for (int c = 0; c < g->n; c++)
+    {
+        AUTO_FREE_TRAVERSAL trav = graph_dfs(g, c);
     }
     return NULL;
 }
 
-static Component* directed_find_connected_components(const Graph* g){
+static Component* directed_find_connected_components(const Graph* g)
+{
+    (void)g;
     return NULL;
 }
 
@@ -26,7 +30,10 @@ static Traversal* traversal_new(int n)
 {
     Traversal* t = malloc(sizeof *t);
     if (!t)
+    {
+        LOG_ERROR("allocation failed for Traversal header (n=%d)", n);
         return NULL;
+    }
     t->order  = malloc((size_t)n * sizeof *t->order);
     t->parent = malloc((size_t)n * sizeof *t->parent);
     t->dist   = malloc((size_t)n * sizeof *t->dist);
@@ -34,6 +41,7 @@ static Traversal* traversal_new(int n)
     t->n      = n;
     if (!t->order || !t->parent || !t->dist)
     {
+        LOG_ERROR("allocation failed for Traversal arrays (n=%d)", n);
         traversal_cleanup(&t); /* free(NULL) is legal: only frees what actually succeeded */
         return NULL;
     }
@@ -42,6 +50,7 @@ static Traversal* traversal_new(int n)
         t->parent[v] = -1;
         t->dist[v]   = -1;
     }
+    LOG_DEBUG("Traversal allocated (n=%d)", n);
     return t;
 }
 
@@ -49,14 +58,15 @@ static Traversal* traversal_new(int n)
  * The purpose of this function is finding connected components
  * on both directed and undirected graphs.
  */
-Component* graph_find_connected_components(const Graph *g){
-    if(g->directed){
+Component* graph_find_connected_components(const Graph* g)
+{
+    LOG_DEBUG("finding connected components (directed=%d, n=%d)", g->directed, g->n);
+    if (g->directed)
+    {
         return directed_find_connected_components(g);
     }
     return undirected_find_connected_components(g);
 }
-
-
 
 Traversal* graph_dfs(const Graph* g, int source)
 {
@@ -70,7 +80,12 @@ Traversal* graph_dfs(const Graph* g, int source)
     } dfs_frame;
 
     if (!g || !vertex_ok(g, source))
+    {
+        LOG_ERROR("invalid argument (g=%p, source=%d)", (const void*)g, source);
         return NULL;
+    }
+
+    LOG_DEBUG("DFS from source=%d (n=%d)", source, g->n);
 
     Traversal* t = traversal_new(g->n);
     if (!t)
@@ -82,6 +97,8 @@ Traversal* graph_dfs(const Graph* g, int source)
     dfs_frame* stack = stack_create(dfs_frame, g->n);
     if (!stack)
     {
+        LOG_ERROR("allocation failed for DFS stack (n=%d)", g->n);
+        traversal_cleanup(&t);
         return NULL;
     }
 
@@ -138,7 +155,7 @@ Traversal* graph_dfs(const Graph* g, int source)
         t->order[t->count++] = v;
 
         dfs_frame child = {0};
-        child.vertex_id   = v;
+        child.vertex_id = v;
         g->ops->iter_out(g, v, &child.it);
         stack_push(stack, child);
     }
@@ -146,13 +163,19 @@ Traversal* graph_dfs(const Graph* g, int source)
     /* Empty stack: every vertex reachable from the source has been expanded.
      * Vertices that were never discovered stay at parent == -1, dist == -1. */
     stack_free(stack);
+    LOG_DEBUG("DFS from source=%d reached %d/%d vertices", source, t->count, t->n);
     return t;
 }
 
 Traversal* graph_bfs(const Graph* g, int source)
 {
     if (!g || !vertex_ok(g, source))
+    {
+        LOG_ERROR("invalid argument (g=%p, source=%d)", (const void*)g, source);
         return NULL;
+    }
+
+    LOG_DEBUG("BFS from source=%d (n=%d)", source, g->n);
 
     Traversal* t = traversal_new(g->n);
     if (!t)
@@ -163,6 +186,8 @@ Traversal* graph_bfs(const Graph* g, int source)
     int* q = queue_create(int, g->n);
     if (!q)
     {
+        LOG_ERROR("allocation failed for BFS queue (n=%d)", g->n);
+        traversal_cleanup(&t);
         return NULL;
     }
 
@@ -200,17 +225,19 @@ Traversal* graph_bfs(const Graph* g, int source)
     /* Empty queue: no reachable vertex is left to explore.
      * Vertices that were never discovered stay at parent == -1, dist == -1. */
     queue_free(q);
+    LOG_DEBUG("BFS from source=%d reached %d/%d vertices", source, t->count, t->n);
     return t;
 }
 
-void traversal_cleanup(Traversal** t) {
-    if (t != NULL && *t != NULL) {
+void traversal_cleanup(Traversal** t)
+{
+    if (t != NULL && *t != NULL)
+    {
         free((*t)->order);
         free((*t)->parent);
         free((*t)->dist);
         free(*t);
         *t = NULL;
-        printf("[DEBUG] Traversal freed automatically!\n");
+        LOG_DEBUG("Traversal freed");
     }
 }
-
