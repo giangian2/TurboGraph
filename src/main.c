@@ -33,7 +33,7 @@ int main(void)
     }
     printf("\nimportato " INPUT_DOT ": %d vertici, %zu archi\n", roads->n, roads->m);
 
-    Traversal* rt = graph_dfs(roads, 7);
+    AUTO_FREE_TRAVERSAL rt = graph_dfs(roads, 7);
     if (!rt)
     {
         fprintf(stderr, "BFS su " INPUT_DOT " fallita\n");
@@ -57,7 +57,6 @@ int main(void)
         printf("Scritto " OUTPUT_DOT " -- renderizza con:\n"
                "  dot -Tpng " OUTPUT_DOT " -o out/twitch_bfs.png\n");
 
-    traversal_free(rt);
     graph_free(roads);
     return 0;
 }
