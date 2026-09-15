@@ -7,8 +7,8 @@
 
 /* I grafi di input stanno in res/, tutto cio' che viene generato in out/.
  * I percorsi sono relativi alla radice del progetto: esegui con `make run`. */
-#define INPUT_DOT "res/europe_roads.dot"
-#define OUTPUT_DOT "out/europe_roads_bfs.dot"
+#define INPUT_DOT "res/BayAreaUs.dot"
+#define OUTPUT_DOT "out/bayarea.dot"
 
 /* Stampa il cammino minimo source -> v risalendo parent[] a ritroso.
  * Ricorsiva: prima stampa il cammino fino al padre, poi v stesso. */
@@ -25,22 +25,6 @@ static void print_path(const Traversal* t, int v)
 int main(void)
 {
 
-    GraphEdge edges[] = {
-        {0, 1, 1.0}, {0, 2, 2.0}, {1, 3, 1.5}, {2, 3, 1.0}, {2, 4, 3.0},
-        {7, 8, 5.0}, {3, 5, 2.0}, {4, 5, 1.0}, {5, 6, 1.0}, {6, 7, 4.0},
-    };
-
-    // QuickSortKruskalMST(edges,10,0,9);
-
-    QuickSortKruskalMST(edges, 10, 0, 9);
-
-    printf("After Sort with Qucik kruskal: \n");
-
-    for (size_t i = 0; i < 10; i++)
-    {
-        printf("MST QICK FIRST EDGE:  [%i,%i].cost=%f \n", edges[i].u, edges[i].v, edges[i].w);
-    }
-
     Graph* roads = graph_import_dot(INPUT_DOT, GRAPH_STAR);
     if (!roads)
     {
@@ -49,7 +33,7 @@ int main(void)
     }
     printf("\nimportato " INPUT_DOT ": %d vertici, %zu archi\n", roads->n, roads->m);
 
-    Traversal* rt = graph_bfs(roads, 7);
+    Traversal* rt = graph_dfs(roads, 7);
     if (!rt)
     {
         fprintf(stderr, "BFS su " INPUT_DOT " fallita\n");
