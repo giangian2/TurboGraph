@@ -2,7 +2,20 @@
 #include "../include/Graph.h"
 #include "../include/Queue.h"
 #include "../include/Stack.h"
+#include <stdio.h>
 #include <stdlib.h>
+
+
+static Component* undirected_find_connected_components(const Graph* g){
+    for(int c = 0; c < g->n; c++){
+        Traversal* trav = graph_dfs(g, c);
+    }
+    return NULL;
+}
+
+static Component* directed_find_connected_components(const Graph* g){
+    return NULL;
+}
 
 /*
  * Allocates a Traversal for a graph of n vertices, with all vertices
@@ -21,7 +34,7 @@ static Traversal* traversal_new(int n)
     t->n      = n;
     if (!t->order || !t->parent || !t->dist)
     {
-        traversal_free(t); /* free(NULL) is legal: only frees what actually succeeded */
+        traversal_cleanup(&t); /* free(NULL) is legal: only frees what actually succeeded */
         return NULL;
     }
     for (int v = 0; v < n; v++)
@@ -31,6 +44,19 @@ static Traversal* traversal_new(int n)
     }
     return t;
 }
+
+/**
+ * The purpose of this function is finding connected components
+ * on both directed and undirected graphs.
+ */
+Component* graph_find_connected_components(const Graph *g){
+    if(g->directed){
+        return directed_find_connected_components(g);
+    }
+    return undirected_find_connected_components(g);
+}
+
+
 
 Traversal* graph_dfs(const Graph* g, int source)
 {
@@ -56,7 +82,6 @@ Traversal* graph_dfs(const Graph* g, int source)
     dfs_frame* stack = stack_create(dfs_frame, g->n);
     if (!stack)
     {
-        traversal_free(t);
         return NULL;
     }
 
@@ -138,7 +163,6 @@ Traversal* graph_bfs(const Graph* g, int source)
     int* q = queue_create(int, g->n);
     if (!q)
     {
-        traversal_free(t);
         return NULL;
     }
 
@@ -179,19 +203,14 @@ Traversal* graph_bfs(const Graph* g, int source)
     return t;
 }
 
-void PrimMST(GraphEdge* edges, int count)
-{
-    /* TODO: da implementare */
-    (void)edges;
-    (void)count;
+void traversal_cleanup(Traversal** t) {
+    if (t != NULL && *t != NULL) {
+        free((*t)->order);
+        free((*t)->parent);
+        free((*t)->dist);
+        free(*t);
+        *t = NULL;
+        printf("[DEBUG] Traversal freed automatically!\n");
+    }
 }
 
-void traversal_free(Traversal* t)
-{
-    if (!t)
-        return;
-    free(t->order);
-    free(t->parent);
-    free(t->dist);
-    free(t);
-}
