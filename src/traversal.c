@@ -61,25 +61,33 @@ static void traversal_reset(Traversal* t)
 }
 
 /*
- * Iterative DFS from `root`, growing the forest held in `t`.
+ * Both visits below share one contract, which is what lets them build a
+ * whole forest out of repeated calls:
  *
- * `t` is shared across calls: any vertex with dist != -1 counts as already
- * visited and is not entered again, so calling this once per unvisited
- * root builds a DFS forest in O(n + m) overall. `root` itself must still
- * be unvisited; it becomes the root of a new tree (parent -1, dist 0) and
- * its tree is appended to t->order as one contiguous segment.
- *
- *   in      false walks out-arcs (DFS on G), true walks in-arcs (DFS on
- *           the transpose G^T, for free: every representation has iter_in)
- *   stack   empty, capacity >= g->n; left empty on return
- *   post    optional (NULL): vertices are appended to post[*npost] in
- *           finish order, i.e. when their adjacency is exhausted
+ *   - `t` is shared across calls: any vertex with dist != -1 counts as
+ *     already visited and is not entered again, so one call per unvisited
+ *     root covers the graph in O(n + m) overall;
+ *   - `root` must still be unvisited; it becomes the root of a new tree
+ *     (parent -1, dist 0), and roots are the only vertices of the forest
+ *     left with parent == -1;
+ *   - the tree is appended to t->order as one contiguous segment that
+ *     begins with its root.
  */
-static void dfs_visit(const Graph* g, int root, bool in, Traversal* t, dfs_frame* stack, int* post,
-                      int* npost)
-{
-    void (*expand)(const Graph*, int, GraphIter*) = in ? g->ops->iter_in : g->ops->iter_out;
 
+/*
+ * Iterative DFS from `root` over the out-arcs of g.
+ *
+ *   stack   empty, capacity >= g->n; left empty on return
+ *   rpost   optional (NULL): reverse finish order. Each vertex, when its
+ *           adjacency is exhausted, is written at rpost[--*rpost_next]:
+ *           filled from the back, so with *rpost_next starting at n the
+ *           array ends up with the LAST vertex to finish first -- the
+ *           order Kosaraju's second pass needs (and, on a DAG, a
+ *           topological order).
+ */
+static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, int* rpost,
+                      int* rpost_next)
+{
     /* The root is the starting point: distance 0 from itself,
      * no parent (stays -1), first vertex of its tree in the visit order. */
     t->dist[root]        = 0;
@@ -87,7 +95,7 @@ static void dfs_visit(const Graph* g, int root, bool in, Traversal* t, dfs_frame
 
     dfs_frame _root_frame = {0};
     _root_frame.vertex_id = root;
-    expand(g, root, &_root_frame.it);
+    g->ops->iter_out(g, root, &_root_frame.it);
     stack_push(stack, _root_frame);
 
     /*
@@ -115,8 +123,8 @@ static void dfs_visit(const Graph* g, int root, bool in, Traversal* t, dfs_frame
          * time), backtrack to its parent. */
         if (!g->ops->iter_next(&_top_frame->it, &v, NULL))
         {
-            if (post)
-                post[(*npost)++] = _top_frame->vertex_id;
+            if (rpost)
+                rpost[--*rpost_next] = _top_frame->vertex_id;
             (void)stack_pop(stack);
             continue;
         }
@@ -137,135 +145,202 @@ static void dfs_visit(const Graph* g, int root, bool in, Traversal* t, dfs_frame
 
         dfs_frame child = {0};
         child.vertex_id = v;
-        expand(g, v, &child.it);
+        g->ops->iter_out(g, v, &child.it);
         stack_push(stack, child);
     }
 }
 
 /*
- * Runs a DFS forest over `t` (which must be fresh or reset), taking the
- * roots in the order given by roots[0 .. n-1], and returns one Component
- * per tree.
+ * BFS from `root`.
  *
- * No bookkeeping of where each tree starts is needed: dfs_visit() lays
- * every tree out as a contiguous segment of t->order that begins with its
- * root, and roots are exactly the vertices left with parent == -1.
+ *   in      false walks out-arcs (BFS on G), true walks in-arcs (BFS on
+ *           the transpose G^T, for free: every representation has iter_in)
+ *   q       empty, capacity >= g->n; left empty on return
  *
- * The result is a single block -- the Component array followed by the n
- * vertex ids the components point into -- so one free() releases it all.
+ * A frontier entry is a bare vertex id (4 bytes) against the 40 of a DFS
+ * frame, so whenever only the set of reached vertices matters -- not the
+ * order in which they finish -- this is the cheaper visit.
  */
-static Component* forest_components(const Graph* g, const int* roots, bool in, Traversal* t,
-                                    dfs_frame* stack, size_t* count)
+static void bfs_visit(const Graph* g, int root, bool in, Traversal* t, int* q)
 {
-    const int n     = g->n;
-    size_t    trees = 0;
+    void (*expand)(const Graph*, int, GraphIter*) = in ? g->ops->iter_in : g->ops->iter_out;
 
-    for (int k = 0; k < n; k++)
+    /* The root is the starting point: distance 0 from itself,
+     * no parent (stays -1), first vertex of its tree in the visit order. */
+    t->dist[root]        = 0;
+    t->order[t->count++] = root;
+    queue_enqueue(q, root);
+
+    /* While there is a discovered but not-yet-processed vertex... */
+    while (!queue_is_empty(q))
     {
-        if (t->dist[roots[k]] != -1)
-            continue;
-        dfs_visit(g, roots[k], in, t, stack, NULL, NULL);
-        trees++;
+        int u = queue_dequeue(q);
+
+        /* Iterate the neighbors of u (the vertex just dequeued, NOT the
+         * root). The iterator lives on the stack: no malloc. */
+        GraphIter it;
+        expand(g, u, &it);
+
+        int v;
+        while (g->ops->iter_next(&it, &v, NULL))
+        { /* weight ignored */
+            if (t->dist[v] != -1)
+                continue; /* already discovered via an equal-or-shorter path */
+
+            /* First discovery of v: u is its parent in the BFS tree and
+             * its distance is one edge more than u's. */
+            t->dist[v]           = t->dist[u] + 1;
+            t->parent[v]         = u;
+            t->order[t->count++] = v;
+            queue_enqueue(q, v);
+        }
+    }
+}
+
+/*
+ * Kosaraju, pass 1: runs a DFS forest over G and returns its vertices in
+ * reverse finish order (a permutation of 0 .. n-1), or NULL if an
+ * allocation fails. The loop over every vertex is what the textbook's
+ * "dummy vertex connected to everything" stands for. Leaves `t` fully
+ * visited: the caller resets it before reusing it.
+ */
+static int* reverse_finish_order(const Graph* g, Traversal* t)
+{
+    const int  n     = g->n;
+    int*       rpost = malloc((size_t)n * sizeof *rpost);
+    dfs_frame* stack = stack_create(dfs_frame, n);
+    if (!rpost || !stack)
+    {
+        LOG_ERROR("allocation failed for Kosaraju pass 1 (n=%d)", n);
+        free(rpost);
+        stack_free(stack);
+        return NULL;
     }
 
-    Component* comps = malloc(trees * sizeof *comps + (size_t)n * sizeof(int));
-    if (!comps)
+    /* Every vertex finishes exactly once, so this counts down to 0. */
+    int rpost_next = n;
+    for (int s = 0; s < n; s++)
+        if (t->dist[s] == -1)
+            dfs_visit(g, s, t, stack, rpost, &rpost_next);
+
+    stack_free(stack);
+    return rpost;
+}
+
+/*
+ * Runs a BFS forest over `t` (which must be fresh or reset), taking the
+ * roots in the order roots[0 .. n-1] -- or 0 .. n-1 when roots is NULL --
+ * and returns one component per tree.
+ *
+ * Each tree is a contiguous segment of t->order that begins with its
+ * root, and roots are the only vertices with parent == -1 (see the
+ * contract above bfs_visit). So once the forest is built, the components
+ * are just t->order cut right before every root: that is all the second
+ * loop does.
+ */
+static Components* forest_components(const Graph* g, const int* roots, bool in, Traversal* t)
+{
+    const int n = g->n;
+    int*      q = queue_create(int, n);
+    if (!q)
+    {
+        LOG_ERROR("allocation failed for BFS queue (n=%d)", n);
+        return NULL;
+    }
+
+    /* 1. Visit: one tree per root not already reached by an earlier one. */
+    size_t trees = 0;
+    for (int k = 0; k < n; k++)
+    {
+        int r = roots ? roots[k] : k;
+        if (t->dist[r] != -1)
+            continue;
+        bfs_visit(g, r, in, t, q);
+        trees++;
+    }
+    queue_free(q);
+
+    /* 2. Allocate: header, trees + 1 offsets, n ids -- one block. */
+    Components* cc = malloc(sizeof *cc + (trees + 1 + (size_t)n) * sizeof(int));
+    if (!cc)
     {
         LOG_ERROR("allocation failed for %zu components (n=%d)", trees, n);
         return NULL;
     }
+    cc->count = trees;
+    cc->n     = n;
+    cc->start = (int*)(cc + 1); /* right after the header, which is 8-aligned */
+    cc->ids   = cc->start + trees + 1;
 
-    int*   ids = (int*)(comps + trees); /* Component is 8-aligned: so is ids */
-    size_t c   = 0;
+    /* 3. Cut: copy t->order and record where each root sits. */
+    size_t c = 0;
     for (int k = 0; k < n; k++)
     {
-        ids[k] = t->order[k];
-        if (t->parent[ids[k]] == -1) /* a root opens a new component */
-        {
-            comps[c].node_ids = &ids[k];
-            comps[c].size     = 0;
-            c++;
-        }
-        comps[c - 1].size++;
+        cc->ids[k] = t->order[k];
+        if (t->parent[cc->ids[k]] == -1)
+            cc->start[c++] = k;
     }
+    cc->start[trees] = n; /* sentinel: the last component ends at n */
 
-    *count = trees;
-    return comps;
+    return cc;
 }
 
 /*
  * Weakly/strongly connected components, depending on g->directed.
  *
- * Undirected: every DFS tree of a forest over G is one connected
+ * Undirected: every tree of a BFS forest over G is one connected
  * component. A single pass, roots taken in vertex order.
  *
- * Directed: Kosaraju. Pass 1 runs a DFS forest over G recording finish
- * order; the outer loop over all vertices plays the role of the textbook
- * "dummy vertex connected to everything", without touching the graph.
- * Pass 2 runs a DFS forest over G^T (iter_in), taking roots by decreasing
- * finish time: each tree of that forest is exactly one strongly connected
- * component, and components come out in topological order of the
- * condensation (a component only has arcs towards later ones).
+ * Directed: Kosaraju. Pass 1 runs a DFS forest over G to get the reverse
+ * finish order; this pass needs a DFS, a BFS has no finish order. Pass 2
+ * runs a forest over G^T (in-arcs), taking roots in that order: each tree
+ * is exactly one strongly connected component. Pass 2 only needs the set
+ * of reached vertices, so it uses the cheaper BFS. Components come out in
+ * topological order of the condensation (a component only has arcs
+ * towards later ones).
  */
-Component* graph_find_connected_components(const Graph* g, size_t* count)
+Components* graph_find_connected_components(const Graph* g)
 {
-    if (!g || !count || g->n <= 0)
+    if (!g || g->n <= 0)
     {
-        LOG_ERROR("invalid argument (g=%p, count=%p)", (const void*)g, (void*)count);
-        if (count)
-            *count = 0;
+        LOG_ERROR("invalid argument (g=%p)", (const void*)g);
         return NULL;
     }
 
     LOG_DEBUG("finding connected components (directed=%d, n=%d)", g->directed, g->n);
 
-    const int  n     = g->n;
-    Component* comps = NULL;
-    *count           = 0;
+    Traversal* t = traversal_new(g->n);
+    if (!t)
+        return NULL;
 
-    Traversal* t     = traversal_new(n);
-    dfs_frame* stack = stack_create(dfs_frame, n);
-    int*       roots = malloc((size_t)n * sizeof *roots);
-    if (!t || !stack || !roots)
-    {
-        LOG_ERROR("allocation failed for components state (n=%d)", n);
-        goto done;
-    }
-
+    int*        roots = NULL; /* NULL = vertex order, all an undirected graph needs */
+    Components* cc    = NULL;
     if (g->directed)
     {
-        /* Pass 1: finish order over G. Every vertex finishes exactly once,
-         * so roots ends up holding a permutation of 0 .. n-1. */
-        int nfinished = 0;
-        for (int s = 0; s < n; s++)
-            if (t->dist[s] == -1)
-                dfs_visit(g, s, false, t, stack, roots, &nfinished);
-
-        /* Decreasing finish time for pass 2. */
-        for (int i = 0, j = n - 1; i < j; i++, j--)
-        {
-            int tmp  = roots[i];
-            roots[i] = roots[j];
-            roots[j] = tmp;
-        }
+        roots = reverse_finish_order(g, t);
+        if (!roots)
+            goto done;
         traversal_reset(t);
     }
-    else
-    {
-        for (int v = 0; v < n; v++)
-            roots[v] = v;
-    }
 
-    /* Pass 2 (directed) walks the transpose; undirected just walks G. */
-    comps = forest_components(g, roots, g->directed, t, stack, count);
-
-    LOG_DEBUG("found %zu components (n=%d)", *count, n);
+    cc = forest_components(g, roots, g->directed, t);
+    if (cc)
+        LOG_DEBUG("found %zu components (n=%d)", cc->count, cc->n);
 
 done:
     free(roots);
-    stack_free(stack);
     traversal_cleanup(&t);
-    return comps;
+    return cc;
+}
+
+void components_cleanup(Components** cc)
+{
+    if (cc != NULL && *cc != NULL)
+    {
+        free(*cc); /* one block: header, offsets and ids */
+        *cc = NULL;
+        LOG_DEBUG("Components freed");
+    }
 }
 
 Traversal* graph_dfs(const Graph* g, int source)
@@ -293,7 +368,7 @@ Traversal* graph_dfs(const Graph* g, int source)
         return NULL;
     }
 
-    dfs_visit(g, source, false, t, stack, NULL, NULL);
+    dfs_visit(g, source, t, stack, NULL, NULL);
 
     /* Empty stack: every vertex reachable from the source has been expanded.
      * Vertices that were never discovered stay at parent == -1, dist == -1. */
@@ -316,8 +391,9 @@ Traversal* graph_bfs(const Graph* g, int source)
     if (!t)
         return NULL;
 
-    /* Capacity g->n: given the invariant above, the queue can never fill
-     * up, so the enqueues below can never fail. */
+    /* Capacity g->n: a vertex is enqueued only after its dist is found to
+     * be -1 and immediately set, so the queue can never fill up and the
+     * enqueues can never fail. */
     int* q = queue_create(int, g->n);
     if (!q)
     {
@@ -326,36 +402,7 @@ Traversal* graph_bfs(const Graph* g, int source)
         return NULL;
     }
 
-    /* The source is the starting point: distance 0 from itself,
-     * no parent (stays -1), first vertex in the visit order. */
-    t->dist[source]      = 0;
-    t->order[t->count++] = source;
-    queue_enqueue(q, source);
-
-    /* While there is a discovered but not-yet-processed vertex... */
-    while (!queue_is_empty(q))
-    {
-        int u = queue_dequeue(q);
-
-        /* Iterate the outgoing neighbors of u (the vertex just dequeued,
-         * NOT the source). The iterator lives on the stack: no malloc. */
-        GraphIter it;
-        g->ops->iter_out(g, u, &it);
-
-        int v;
-        while (g->ops->iter_next(&it, &v, NULL))
-        { /* weight ignored */
-            if (t->dist[v] != -1)
-                continue; /* already discovered via an equal-or-shorter path */
-
-            /* First discovery of v: u is its parent in the BFS tree and
-             * its distance is one edge more than u's. */
-            t->dist[v]           = t->dist[u] + 1;
-            t->parent[v]         = u;
-            t->order[t->count++] = v;
-            queue_enqueue(q, v);
-        }
-    }
+    bfs_visit(g, source, false, t, q);
 
     /* Empty queue: no reachable vertex is left to explore.
      * Vertices that were never discovered stay at parent == -1, dist == -1. */
