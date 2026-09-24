@@ -4,6 +4,7 @@
 #include "../include/Sorting.h"
 #include "../include/Traversal.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 /* I grafi di input stanno in res/, tutto cio' che viene generato in out/.
  * I percorsi sono relativi alla radice del progetto: esegui con `make run`. */
@@ -30,6 +31,22 @@ int main(void)
         return 1;
     }
     printf("Node Serch from %d: reached %d vertex of %d\n", EXAMPLE_NODE, rt->count, rt->n);
+
+    size_t     ncomp = 0;
+    Component* comps = graph_find_connected_components(roads, &ncomp);
+    if (!comps)
+    {
+        fprintf(stderr, "Connected components on " INPUT_DOT " failed\n");
+        graph_free(roads);
+        return 1;
+    }
+    size_t largest = 0;
+    for (size_t c = 0; c < ncomp; c++)
+        if (comps[c].size > largest)
+            largest = comps[c].size;
+    printf("%s components: %zu (largest: %zu vertices)\n",
+           roads->directed ? "Strongly connected" : "Connected", ncomp, largest);
+    free(comps); /* one block: the array and every node_ids */
 
     int rc = graph_export_dot(roads, rt, OUTPUT_DOT);
     if (rc != GRAPH_OK)

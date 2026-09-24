@@ -38,6 +38,18 @@ typedef struct
 
 Traversal* graph_bfs(const Graph* g, int source);
 Traversal* graph_dfs(const Graph* g, int source);
+
+/*
+ * Connected components: strongly connected (Kosaraju) when g is directed,
+ * plain connected components when it is undirected. O(n + m), on every
+ * representation, without modifying g.
+ *
+ * Returns an array of *count components that partition 0 .. n-1; for a
+ * directed graph they come out in topological order of the condensation.
+ * The array and every node_ids it points to live in ONE block: release
+ * it with a single free(). NULL (and *count = 0) on error.
+ */
+Component* graph_find_connected_components(const Graph* g, size_t* count);
 void       traversal_cleanup(Traversal** t);
 
 #define AUTO_FREE_TRAVERSAL __attribute__((cleanup(traversal_cleanup))) Traversal*
