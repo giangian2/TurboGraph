@@ -1,7 +1,6 @@
 #include "../include/Traversal.h"
 #include "../include/Debug.h"
 #include "../include/Graph.h"
-#include "../include/Queue.h"
 #include "../include/Stack.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -155,26 +154,28 @@ static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, 
  *
  *   in      false walks out-arcs (BFS on G), true walks in-arcs (BFS on
  *           the transpose G^T, for free: every representation has iter_in)
- *   q       empty, capacity >= g->n; left empty on return
  *
- * A frontier entry is a bare vertex id (4 bytes) against the 40 of a DFS
+ * No separate queue: vertices enter t->order in the same order they must
+ * be dequeued, so the slice t->order[head .. count) is the frontier.
+ *
+ * A frontier entry is a bare vertex id (4 bytes) against the 56 of a DFS
  * frame, so whenever only the set of reached vertices matters -- not the
  * order in which they finish -- this is the cheaper visit.
  */
-static void bfs_visit(const Graph* g, int root, bool in, Traversal* t, int* q)
+static void bfs_visit(const Graph* g, int root, bool in, Traversal* t)
 {
     void (*expand)(const Graph*, int, GraphIter*) = in ? g->ops->iter_in : g->ops->iter_out;
 
     /* The root is the starting point: distance 0 from itself,
      * no parent (stays -1), first vertex of its tree in the visit order. */
+    int head             = t->count;
     t->dist[root]        = 0;
     t->order[t->count++] = root;
-    queue_enqueue(q, root);
 
     /* While there is a discovered but not-yet-processed vertex... */
-    while (!queue_is_empty(q))
+    while (head < t->count)
     {
-        int u = queue_dequeue(q);
+        int u = t->order[head++];
 
         /* Iterate the neighbors of u (the vertex just dequeued, NOT the
          * root). The iterator lives on the stack: no malloc. */
@@ -192,7 +193,6 @@ static void bfs_visit(const Graph* g, int root, bool in, Traversal* t, int* q)
             t->dist[v]           = t->dist[u] + 1;
             t->parent[v]         = u;
             t->order[t->count++] = v;
-            queue_enqueue(q, v);
         }
     }
 }
@@ -241,12 +241,6 @@ static int* reverse_finish_order(const Graph* g, Traversal* t)
 static Components* forest_components(const Graph* g, const int* roots, bool in, Traversal* t)
 {
     const int n = g->n;
-    int*      q = queue_create(int, n);
-    if (!q)
-    {
-        LOG_ERROR("allocation failed for BFS queue (n=%d)", n);
-        return NULL;
-    }
 
     /* 1. Visit: one tree per root not already reached by an earlier one. */
     size_t trees = 0;
@@ -255,10 +249,9 @@ static Components* forest_components(const Graph* g, const int* roots, bool in, 
         int r = roots ? roots[k] : k;
         if (t->dist[r] != -1)
             continue;
-        bfs_visit(g, r, in, t, q);
+        bfs_visit(g, r, in, t);
         trees++;
     }
-    queue_free(q);
 
     /* 2. Allocate: header, trees + 1 offsets, n ids -- one block. */
     Components* cc = malloc(sizeof *cc + (trees + 1 + (size_t)n) * sizeof(int));
@@ -391,22 +384,10 @@ Traversal* graph_bfs(const Graph* g, int source)
     if (!t)
         return NULL;
 
-    /* Capacity g->n: a vertex is enqueued only after its dist is found to
-     * be -1 and immediately set, so the queue can never fill up and the
-     * enqueues can never fail. */
-    int* q = queue_create(int, g->n);
-    if (!q)
-    {
-        LOG_ERROR("allocation failed for BFS queue (n=%d)", g->n);
-        traversal_cleanup(&t);
-        return NULL;
-    }
+    bfs_visit(g, source, false, t);
 
-    bfs_visit(g, source, false, t, q);
-
-    /* Empty queue: no reachable vertex is left to explore.
+    /* Frontier exhausted: no reachable vertex is left to explore.
      * Vertices that were never discovered stay at parent == -1, dist == -1. */
-    queue_free(q);
     LOG_DEBUG("BFS from source=%d reached %d/%d vertices", source, t->count, t->n);
     return t;
 }
