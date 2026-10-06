@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TurboGraph Viewer</title>
+<style>
+  :root {
+    --bg: #fbfbfc; --panel: #ffffff; --text: #1d2128; --muted: #6b7280;
+    --border: #e3e5e8; --accent: #0a84ff; --error: #d93025;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d; --panel: #1e2128; --text: #e6e8eb; --muted: #9aa1ab;
+      --border: #2c3038; --accent: #5cc8ff; --error: #ff6b5e;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 14px/1.4 system-ui, -apple-system, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr auto; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+           padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; }
+  .group { display: flex; gap: 6px; align-items: center; }
+  select, button, label.file { font: inherit; color: var(--text); background: var(--bg);
+           border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover, label.file:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  label.file input { display: none; }
+  #stage { position: relative; min-height: 0; overflow: hidden; }
+  footer { display: flex; flex-wrap: wrap; gap: 4px 18px; padding: 6px 16px; font-size: 12.5px;
+           color: var(--muted); background: var(--panel); border-top: 1px solid var(--border); }
+  #msg.error { color: var(--error); }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TurboGraph</h1>
+  <div class="group">
+    <select id="sample" aria-label="Grafo di esempio">
+      <option value="../res/europe_roads.dot">europe_roads.dot</option>
+      <option value="../res/twitch.dot">twitch.dot</option>
+      <option value="../res/BayAreaUs.dot" data-co="../res/BayAreaUs.co.gz" data-repr="2">BayAreaUs.dot + .co (321k nodi)</option>
+      <option value="../res/WesternUSA.dot" data-co="../res/WesternUSA.co.gz" data-repr="2">WesternUSA.dot + .co (6,3M nodi)</option>
+    </select>
+    <label class="file">Apri .dot…<input id="file" type="file" accept=".dot,.gv,.txt,.gz"></label>
+    <label class="file" title="Coordinate DIMACS (v id lon lat) o righe &quot;id x y&quot;">Apri .co…<input id="cofile" type="file" accept=".co,.gz,.txt"></label>
+    <select id="repr" aria-label="Rappresentazione">
+      <option value="1">list (modificabile)</option>
+      <option value="2">star (sola lettura)</option>
+    </select>
+  </div>
+  <div class="group">
+    <button id="bfs" disabled>BFS</button>
+    <button id="dfs" disabled>DFS</button>
+    <button id="cc">Componenti</button>
+    <button id="clear">Pulisci</button>
+  </div>
+  <div class="group">
+    <button id="addv">+ Vertice</button>
+    <button id="fit">Adatta</button>
+  </div>
+</header>
+
+<div id="stage"></div>
+
+<footer>
+  <span id="stats">caricamento wasm…</span>
+  <span id="msg"></span>
+  <span>click: sorgente · <kbd>Shift</kbd>+click: aggiungi arco · <kbd>Alt</kbd>+click su arco: rimuovi · trascina: sposta · doppio click: sblocca</span>
+</footer>
+
+<script type="module">
+import createGraphsModule from "../bin/wasm/graphs.mjs";
+import { TurboGraph } from "./turbograph.js";
+import { GraphView } from "./graphview.js";
+import { parseCoords, byteStream } from "./coords.js";
+
+const $ = (id) => document.getElementById(id);
+const tg = await TurboGraph.load(createGraphsModule);
+
+/* A source is { name, open() -> Promise<ReadableStream> }: files are read
+ * as streams, never as whole strings (WesternUSA.dot is 555MB). last keeps
+ * the current ones to reload when the representation changes. */
+let graph = null, view = null, source = -1, last = null; // last = { dot, co }
+
+function say(text, error = false) {
+  $("msg").textContent = text;
+  $("msg").className = error ? "error" : "";
+}
+
+async function timed(label, fn) {
+  const t0 = performance.now();
+  const r = await fn();
+  say(`${label}: ${(performance.now() - t0).toFixed(0)} ms`);
+  return r;
+}
+
+/* Lets the browser paint a status message before a long synchronous step. */
+const paint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
+
+function refreshStats() {
+  const names = { 0: "matrix", 1: "list", 2: "star" };
+  $("stats").textContent =
+    `n=${graph.n} · m=${graph.m} · ${graph.directed ? "diretto" : "non diretto"} · ${names[graph.repr]}` +
+    (view.hasCoords ? " · coordinate" : "") + (source >= 0 ? ` · sorgente=${source}` : "");
+  $("bfs").disabled = $("dfs").disabled = source < 0;
+  $("addv").disabled = !graph.mutable;
+}
+
+const urlSource = (url) => ({
+  name: url,
+  async open() {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+    return byteStream(res, url);
+  },
+});
+const fileSource = (f) => ({ name: f.name, open: async () => byteStream(f, f.name) });
+
+async function applyCoords(co) {
+  say(`coordinate ${co.name}…`);
+  const c = await timed("coordinate", async () => parseCoords(await co.open(), graph.n));
+  const msg = `${$("msg").textContent} · ${c.count} vertici posizionati`;
+  await paint();
+  view.setPositions(c.xs, c.ys);
+  say(msg);
+}
+
+async function load(dot, co = null) {
+  last = { dot, co };
+  say(`import ${dot.name}…`);
+  await paint();
+  const repr = Number($("repr").value);
+  const next = await timed("import DOT", async () => tg.fromDotStream(await dot.open(), { repr }));
+  const msg = $("msg").textContent;
+  say(`${msg} · disegno…`);
+  await paint();
+  graph?.free();
+  graph = next;
+  source = -1;
+  if (view) {
+    view.setGraph(graph, { reset: true });
+  } else {
+    view = new GraphView($("stage"), graph, { hideIsolated: true });
+    view.onNodeClick = nodeClick;
+    view.onEdgeClick = edgeClick;
+    view.onBackgroundClick = () => { source = -1; view.selected.clear(); view._dirty.draw = true; refreshStats(); };
+  }
+  say(msg);
+  if (co) await applyCoords(co);
+  else if (view.layoutTooBig) say(`${graph.n} vertici: troppi per il layout automatico, carica un file .co`, true);
+  else setTimeout(() => view.fit(), 1500); // re-frame once the layout has spread out
+  refreshStats();
+}
+
+function mutate(label, fn) {
+  if (!graph.mutable) return say("la rappresentazione star è immutabile: passa a list", true);
+  try {
+    fn();
+    view.setGraph(graph);
+    refreshStats();
+    say(label);
+  } catch (e) {
+    say(e.message, true);
+  }
+}
+
+function nodeClick(v, ev) {
+  if (ev.shiftKey && source >= 0 && v !== source) {
+    const u = source;
+    mutate(`arco ${u} ${graph.directed ? "→" : "—"} ${v} aggiunto`, () => graph.addEdge(u, v, 1));
+    return;
+  }
+  source = v;
+  view.selected = new Set([v]);
+  view._dirty.draw = true;
+  refreshStats();
+}
+
+/* A drawn segment may stand for both arcs u->v and v->u: remove both. */
+function edgeClick(u, v, ev) {
+  if (!ev.altKey) return;
+  mutate(`arco ${u}–${v} rimosso`, () => {
+    graph.removeEdge(u, v);
+    if (graph.directed && graph.hasEdge(v, u)) graph.removeEdge(v, u);
+  });
+}
+
+async function loadSample() {
+  const opt = $("sample").selectedOptions[0];
+  if (opt.dataset.repr) $("repr").value = opt.dataset.repr;
+  try {
+    await load(urlSource(opt.value), opt.dataset.co ? urlSource(opt.dataset.co) : null);
+  } catch (e) {
+    say(e.message, true);
+  }
+}
+
+$("sample").onchange = loadSample;
+$("file").onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (f) await load(fileSource(f)).catch((err) => say(err.message, true));
+};
+$("cofile").onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f || !graph) return;
+  try {
+    last.co = fileSource(f);
+    await applyCoords(last.co);
+    refreshStats();
+  } catch (err) {
+    say(err.message, true);
+  }
+};
+$("repr").onchange = () => last && load(last.dot, last.co).catch((e) => say(e.message, true));
+$("bfs").onclick = async () => view.showTraversal(await timed("BFS", () => graph.bfs(source)));
+$("dfs").onclick = async () => view.showTraversal(await timed("DFS", () => graph.dfs(source)));
+$("cc").onclick = async () => {
+  const c = await timed("componenti", () => graph.components());
+  view.showComponents(c);
+  say(`${$("msg").textContent} · ${c.count} componenti${graph.directed ? " fortemente connesse" : ""}`);
+};
+$("clear").onclick = () => view.clearHighlight();
+$("fit").onclick = () => view.fit();
+$("addv").onclick = () => mutate(`vertice ${graph.n} aggiunto`, () => { graph = graph.withVertices(1); });
+
+/* Handy from the devtools console: demo.view, demo.graph. */
+window.demo = { get view() { return view; }, get graph() { return graph; }, tg };
+
+loadSample();
+</script>
+</body>
+</html>

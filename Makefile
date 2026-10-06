@@ -86,7 +86,36 @@ profile: bin/cgdiff | out
 bin/cgdiff: tools/cgdiff.c | bin
 	$(CC) -std=c11 -Wall -Wextra -O2 $< -o $@
 
+# --- WebAssembly ---------------------------------------------------------
+# The same library sources plus the flat binding in wasm/wasm_api.c,
+# compiled with Emscripten into an ES module (bin/wasm/graphs.mjs + .wasm)
+# that wasm/turbograph.js wraps. Always -O2: it also drops the unused
+# MST_AVAILABLE_ALGORITHMS table that would otherwise need every MST symbol.
+# Memory is capped at 2GB so every pointer stays a positive int on the JS
+# side (WesternUSA, the largest input, peaks well below that).
+#
+#   make wasm          build bin/wasm/graphs.{mjs,wasm} (needs emcc on PATH)
+#   make wasm-serve    serve the repo root, then open /wasm/demo.html
+EMCC     ?= emcc
+WASM_DIR  = bin/wasm
+WASM_MJS  = $(WASM_DIR)/graphs.mjs
+EMFLAGS   = -std=c11 -O2 -Iinclude \
+            -sMODULARIZE -sEXPORT_ES6 -sEXPORT_NAME=createGraphsModule \
+            -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=2GB -sFORCE_FILESYSTEM \
+            -sEXPORTED_FUNCTIONS=_malloc,_free \
+            -sEXPORTED_RUNTIME_METHODS=FS,HEAPU8,HEAP32,HEAPF64,stringToNewUTF8
+
+wasm: $(WASM_MJS)
+
+$(WASM_MJS): $(SRC) wasm/wasm_api.c $(HDR) Makefile
+	mkdir -p $(WASM_DIR)
+	$(EMCC) $(EMFLAGS) $(SRC) wasm/wasm_api.c -o $@
+
+wasm-serve: $(WASM_MJS)
+	@echo "open http://localhost:8000/wasm/demo.html"
+	python3 -m http.server 8000
+
 clean:
 	rm -rf build bin
 
-.PHONY: all test run clean memcheck profile
+.PHONY: all test run clean memcheck profile wasm wasm-serve

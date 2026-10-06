@@ -25,3 +25,8 @@ perf.data*
 *.swp
 *~
 .DS_Store
+
+# --- large generated inputs ----------------------------------------------
+# 555MB, over GitHub's file limit: regenerate it from the DIMACS source with
+#   tools/gr2dot.sh USA-road-d.W.gr.gz > res/WesternUSA.dot
+/res/WesternUSA.dot
