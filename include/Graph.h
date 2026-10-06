@@ -37,7 +37,7 @@ typedef enum
 } ERROR_CODES;
 
 typedef struct Graph    Graph;
-typedef struct GraphOps GraphOps; /* private vtable, see src/internal.h */
+typedef struct GraphOps GraphOps; 
 
 typedef struct
 {

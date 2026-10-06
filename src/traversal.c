@@ -1,7 +1,6 @@
 #include "../include/Traversal.h"
 #include "../include/Debug.h"
 #include "../include/Graph.h"
-#include "../include/Sorting.h"
 #include "../include/Stack.h"
 #include "../include/UnionFInd.h"
 #include <stdio.h>

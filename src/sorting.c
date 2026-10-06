@@ -1,4 +1,4 @@
-#include "../include/Sorting.h"
+#include "../include/Traversal.h"
 #include "../include/Debug.h"
 #include "../include/Graph.h"
 #include <stdbool.h>
