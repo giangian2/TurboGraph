@@ -52,11 +52,14 @@ typedef struct
  */
 typedef struct
 {
-    const Graph* g;
-    int          u;    /* vertex whose neighbors are being walked   */
-    int          i;    /* cursor: column (matrix) or index (star)   */
-    void*        node; /* cursor: current chain node (list)         */
-    bool         in;   /* walking in-neighbors instead of out       */
+    const Graph*  g;
+    int           u;    /* vertex whose neighbors are being walked   */
+    int           i;    /* cursor: column (matrix) or index (star)   */
+    void*         node; /* cursor: current chain node (list)         */
+    const int*    nbr;  /* star: to[] or from[], resolved once       */
+    const double* w;    /* star: weights parallel to nbr             */
+    int           end;  /* star: one past u's last arc               */
+    bool          in;   /* walking in-neighbors instead of out       */
 } GraphIter;
 
 struct GraphOps

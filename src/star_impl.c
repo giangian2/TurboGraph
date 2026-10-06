@@ -72,6 +72,9 @@ static void star_iter_out(const Graph* g, int u, GraphIter* it)
     it->in   = false;
     it->u    = u;
     it->i    = st_heads(star)[u];
+    it->end  = st_heads(star)[u + 1];
+    it->nbr  = st_to(star);
+    it->w    = st_w(star);
     it->node = NULL; // unused by this representation
 }
 
@@ -89,32 +92,33 @@ static void star_iter_in(const Graph* g, int u, GraphIter* it)
     it->in   = true;
     it->u    = u;
     it->i    = st_rheads(star)[u];
+    it->end  = st_rheads(star)[u + 1];
+    it->nbr  = st_from(star);
+    it->w    = st_rw(star);
     it->node = NULL;
 }
 
+/*
+ * Arrays and bounds were resolved once by iter_out/iter_in, so the per-arc
+ * cost is a compare and a load: no direction test, no offset arithmetic.
+ */
 static bool star_iter_next(GraphIter* it, int* v, double* w)
 {
-    const Star*   star    = (const Star*)it->g->data;
-    const bool    back    = use_in_star(it->g, it->in);
-    const int*    head    = back ? st_rheads(star) : st_heads(star);
-    const int*    nbr     = back ? st_from(star) : st_to(star);
-    const double* weights = back ? st_rw(star) : st_w(star);
-
     /*
      * Boundary check. Only the upper bound is tested, and it is exclusive:
-     * head[u+1] is the first index belonging to the next vertex. The lower
-     * bound needs no test -- iter_out/iter_in set i = head[u] and nothing
-     * but the increment below ever moves it. A zero-degree vertex has
-     * head[u] == head[u+1] and stops here on the very first call.
+     * end = head[u+1] is the first index belonging to the next vertex. The
+     * lower bound needs no test -- iter_out/iter_in set i = head[u] and
+     * nothing but the increment below ever moves it. A zero-degree vertex
+     * has i == end and stops here on the very first call.
      */
-    if (it->i >= head[it->u + 1])
+    if (it->i >= it->end)
         return false;
 
     /* Both outputs are optional: graph_bfs() passes NULL for the weight. */
     if (v)
-        *v = nbr[it->i];
+        *v = it->nbr[it->i];
     if (w)
-        *w = weights[it->i];
+        *w = it->w[it->i];
 
     it->i++;
     return true;
