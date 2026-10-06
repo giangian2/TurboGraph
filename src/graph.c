@@ -51,7 +51,8 @@ Graph* graph_create(int n, bool directed, GraphRepr repr)
     case GRAPH_LIST:
         rc = list_init(g);
         break;
-    case GRAPH_STAR: /* immutable: an empty star would be useless */
+    case GRAPH_STAR: /* immutable: an empty star would be useless, instantiate it through dedicated
+                        funciton */
     default:
         rc = GRAPH_ERR_ARG;
         break;
