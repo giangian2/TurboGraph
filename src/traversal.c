@@ -404,3 +404,90 @@ void traversal_cleanup(Traversal** t)
         LOG_DEBUG("Traversal freed");
     }
 }
+
+GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges)
+{
+    //g->n - 1 is the MST size
+    int mst_ardinality = 0;
+
+    GraphEdge* MST = (GraphEdge*)malloc(sizeof(GraphEdge)*(g->n -1));
+
+    QuickSort(edges, g->m, 0, g->m);
+
+    LOG_DEBUG("Ordering edges done with quick sort!");
+
+    for(int i = 0; i < g->n; i++)
+    {
+
+    }
+
+    while(mst_ardinality < (g->n-1))
+    {
+        /**
+         * @todo CREATE UNION FIND
+         */
+    }
+}
+
+int partition(GraphEdge* edges, int count, int p, int q)
+{
+    // Handle edge cases
+    if (p < 0 || q >= count)
+    {
+        LOG_ERROR("invalid range (p=%d, q=%d, count=%d)", p, q, count);
+        return -1;
+    }
+
+    int e_minus = p;
+    int e_plus  = q;
+
+    while (e_minus < e_plus)
+    {
+        while (edges[e_plus].w > edges[p].w)
+        {
+            e_plus--;
+        }
+
+        while (edges[e_minus].w < edges[p].w)
+        {
+            e_minus++;
+        }
+
+        if (e_minus < e_plus)
+        {
+            // SWAP
+            GraphEdge tmp  = edges[e_minus];
+            edges[e_minus] = edges[e_plus];
+            edges[e_plus]  = tmp;
+
+            e_minus++;
+            e_plus--;
+        }
+    }
+
+    return e_plus;
+}
+
+void QuickSort(GraphEdge* edges, int count, int p, int q)
+{
+    // BASE
+    if (p >= q)
+    {
+        return;
+    }
+
+    LOG_DEBUG("sorting range [%d, %d]", p, q);
+
+    int pivot_position = partition(edges, count, p, q);
+
+    /* Because partition() uses the Hoare scheme, pivot_position is only a
+     * split point, not the pivot's final index: the element at
+     * pivot_position is NOT guaranteed to be already sorted, so it must be
+     * included in the left recursive call (range [p, pivot_position]).
+     * Using [p, pivot_position-1] here would silently skip that element
+     * from both halves and leave the array unsorted. */
+    QuickSort(edges, count, p, pivot_position);
+
+    QuickSort(edges, count, pivot_position + 1, q);
+}
+

@@ -71,4 +71,13 @@ void        traversal_cleanup(Traversal** t);
 #define AUTO_FREE_TRAVERSAL __attribute__((cleanup(traversal_cleanup))) Traversal*
 #define AUTO_FREE_COMPONENTS __attribute__((cleanup(components_cleanup))) Components*
 
+/* ---- MST -------------------------------------------------------- */
+
+/* ---- ordering utils --------------------------------------------- */
+void QuickSort(GraphEdge* edges, int count, int p, int q);
+int partition(GraphEdge* edges, int count, int p, int q);
+
+/* ---- algorithms ------------------------------------------------- */
+GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges);
+
 #endif /* TRAVERSAL_H */
