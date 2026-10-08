@@ -43,6 +43,7 @@
       <option value="../res/europe_roads.dot">europe_roads.dot</option>
       <option value="../res/twitch.dot">twitch.dot</option>
       <option value="../res/BayAreaUs.dot" data-co="../res/BayAreaUs.co.gz" data-repr="2">BayAreaUs.dot + .co (321k nodi)</option>
+      <option value="../res/BayAreaUs_undirected.dot" data-co="../res/BayAreaUs.co.gz" data-repr="2">BayAreaUs_undirected.dot + .co (non diretto)</option>
       <option value="../res/WesternUSA.dot" data-co="../res/WesternUSA.co.gz" data-repr="2">WesternUSA.dot + .co (6,3M nodi)</option>
     </select>
     <label class="file">Apri .dot…<input id="file" type="file" accept=".dot,.gv,.txt,.gz"></label>
@@ -56,6 +57,7 @@
     <button id="bfs" disabled>BFS</button>
     <button id="dfs" disabled>DFS</button>
     <button id="cc">Componenti</button>
+    <button id="mst" disabled title="Kruskal, solo grafi non diretti">MST</button>
     <button id="clear">Pulisci</button>
   </div>
   <div class="group">
@@ -108,6 +110,7 @@ function refreshStats() {
     (view.hasCoords ? " · coordinate" : "") + (source >= 0 ? ` · sorgente=${source}` : "");
   $("bfs").disabled = $("dfs").disabled = source < 0;
   $("addv").disabled = !graph.mutable;
+  $("mst").disabled = graph.directed;
 }
 
 const urlSource = (url) => ({
@@ -224,6 +227,11 @@ $("cc").onclick = async () => {
   const c = await timed("componenti", () => graph.components());
   view.showComponents(c);
   say(`${$("msg").textContent} · ${c.count} componenti${graph.directed ? " fortemente connesse" : ""}`);
+};
+$("mst").onclick = async () => {
+  const t = await timed("MST Kruskal", () => graph.mstKruskal());
+  view.showMST(t);
+  say(`${$("msg").textContent} · ${t.u.length} archi, peso totale ${t.weight.toLocaleString("it-IT")}`);
 };
 $("clear").onclick = () => view.clearHighlight();
 $("fit").onclick = () => view.fit();

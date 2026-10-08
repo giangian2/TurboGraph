@@ -347,6 +347,18 @@ export class GraphView {
     this._dirty.colors = this._dirty.highlight = this._dirty.draw = true;
   }
 
+  /**
+   * Draws a spanning forest ({ u, v }, e.g. graph.mstKruskal()) in the
+   * accent color. With animate its edges appear in the order Kruskal picked
+   * them, i.e. by increasing weight, over ~seconds.
+   */
+  showMST(mst, { animate = true, seconds = 4 } = {}) {
+    const k = mst.u.length;
+    this.highlight = { kind: "mst", mst, shown: animate ? 0 : k };
+    this._anim = animate ? { start: performance.now(), perSecond: Math.max(60, k / seconds) } : null;
+    this._dirty.colors = this._dirty.highlight = this._dirty.draw = true;
+  }
+
   clearHighlight() {
     this.highlight = null;
     this._anim = null;
@@ -509,7 +521,7 @@ export class GraphView {
       this.buf.edges.patch(4 * i + off, 2);
     }
     this._dirty.grid = this._dirty.draw = true;
-    if (this.highlight?.kind === "traversal") this._dirty.highlight = true;
+    if (this.highlight?.kind === "traversal" || this.highlight?.kind === "mst") this._dirty.highlight = true;
   }
 
   _fillColors() {
@@ -525,10 +537,11 @@ export class GraphView {
     this.buf.nodeColors.upload(col);
   }
 
-  /* Traversal buffers are in visit order, so drawing the first `shown`
-   * entries is all the animation needs. */
+  /* Traversal buffers are in visit order (MST ones in Kruskal order), so
+   * drawing the first `shown` entries is all the animation needs. */
   _fillTraversal() {
     const h = this.highlight;
+    if (h?.kind === "mst") return this._fillMST();
     if (h?.kind !== "traversal") return;
     const { order, parent, dist } = h.t, k = order.length, { x, y } = this;
     const tree = new Float32Array(4 * k), pos = new Float32Array(2 * k), col = new Uint8Array(4 * k);
@@ -545,6 +558,21 @@ export class GraphView {
     this.buf.tree.upload(tree);
     this.buf.reached.upload(pos);
     this.buf.reachedColors.upload(col);
+  }
+
+  _fillMST() {
+    const { u, v } = this.highlight.mst, k = u.length, { x, y } = this;
+    const tree = new Float32Array(4 * k);
+    for (let i = 0; i < k; i++) {
+      tree[4 * i] = x[u[i]]; tree[4 * i + 1] = y[u[i]];
+      tree[4 * i + 2] = x[v[i]]; tree[4 * i + 3] = y[v[i]];
+    }
+    this.buf.tree.upload(tree);
+  }
+
+  /* Number of entries an animated highlight reveals in total. */
+  _highlightLen(h) {
+    return h.kind === "traversal" ? h.t.order.length : h.mst.u.length;
   }
 
   /* ---- rendering ------------------------------------------------------ */
@@ -565,9 +593,10 @@ export class GraphView {
   _frame(now) {
     if (this.layoutOn && (this.alpha > 0.005 || this._drag?.node >= 0)) this._tick();
     const h = this.highlight;
-    if (this._anim && h?.kind === "traversal") {
-      h.shown = Math.min(h.t.order.length, Math.floor(((now - this._anim.start) / 1000) * this._anim.perSecond));
-      if (h.shown >= h.t.order.length) this._anim = null;
+    if (this._anim && (h?.kind === "traversal" || h?.kind === "mst")) {
+      const total = this._highlightLen(h);
+      h.shown = Math.min(total, Math.floor(((now - this._anim.start) / 1000) * this._anim.perSecond));
+      if (h.shown >= total) this._anim = null;
       this._dirty.draw = true;
     }
     const d = this._dirty;
@@ -601,12 +630,12 @@ export class GraphView {
       else gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
     };
 
-    /* Edges, then the traversal tree on top. */
+    /* Edges, then the traversal tree (or the MST) on top. */
     let loc = use(this.lineProg);
     attrib(loc.a_pos, this.buf.edges, 2);
     gl.uniform4fv(loc.u_color, c.edge);
     gl.drawArrays(gl.LINES, 0, 2 * this.eu.length);
-    if (h?.kind === "traversal" && h.shown) {
+    if ((h?.kind === "traversal" || h?.kind === "mst") && h.shown) {
       attrib(loc.a_pos, this.buf.tree, 2);
       gl.uniform4fv(loc.u_color, c.treeRGB);
       gl.drawArrays(gl.LINES, 0, 2 * h.shown);

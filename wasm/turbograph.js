@@ -223,6 +223,32 @@ export class Graph {
   }
 
   /**
+   * Kruskal minimum spanning forest (undirected graphs only), edges in the
+   * order Kruskal picks them: by increasing weight.
+   * @returns {{ u: Int32Array, v: Int32Array, w: Float64Array, weight: number }}
+   */
+  mstKruskal() {
+    const M = this._m;
+    const cap = Math.max(1, this.n - 1);
+    const uv = M._malloc(cap * 8);
+    const w = M._malloc(cap * 8);
+    try {
+      const k = check(M._wg_mst_kruskal(this.ptr, uv, w, cap), "mstKruskal");
+      const U = M.HEAP32.subarray(uv >> 2, (uv >> 2) + 2 * k);
+      const out = { u: new Int32Array(k), v: new Int32Array(k), w: M.HEAPF64.slice(w >> 3, (w >> 3) + k), weight: 0 };
+      for (let i = 0; i < k; i++) {
+        out.u[i] = U[2 * i];
+        out.v[i] = U[2 * i + 1];
+        out.weight += out.w[i];
+      }
+      return out;
+    } finally {
+      M._free(uv);
+      M._free(w);
+    }
+  }
+
+  /**
    * The library has a fixed vertex count, so adding vertices rebuilds the
    * graph. Returns the new Graph and frees this one.
    */

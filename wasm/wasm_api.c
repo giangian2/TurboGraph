@@ -222,3 +222,49 @@ EMSCRIPTEN_KEEPALIVE int wg_components(const Graph* g, int* comp)
             comp[cc->ids[i]] = (int)c;
     return (int)cc->count;
 }
+
+/*
+ * Kruskal minimum spanning forest of an undirected graph. Writes the forest
+ * edges, in the order Kruskal picks them (by increasing weight), as pairs
+ * into uv (2 * cap ints) and their weights into w (cap doubles); n - 1
+ * entries are always enough. Returns the number of edges written, or
+ * GRAPH_ERR_ARG (directed graph, cap too small) / GRAPH_ERR_ALLOC.
+ */
+EMSCRIPTEN_KEEPALIVE int wg_mst_kruskal(const Graph* g, int* uv, double* w, int cap)
+{
+    if (!g || !uv || !w || g->directed || cap < g->n - 1)
+        return GRAPH_ERR_ARG;
+
+    GraphEdge* edges = malloc((g->m ? g->m : 1) * sizeof *edges);
+    if (!edges)
+        return GRAPH_ERR_ALLOC;
+
+    /* Every edge once, from the smaller index, as in wg_edges: self loops
+     * included, so exactly g->m entries (uf_union then rejects them) */
+    size_t m = 0;
+    for (int u = 0; u < g->n; u++)
+    {
+        GraphIter it;
+        graph_iter_out(g, u, &it);
+        int    v;
+        double wt;
+        while (graph_iter_next(&it, &v, &wt))
+            if (u <= v)
+                edges[m++] = (GraphEdge){u, v, wt};
+    }
+
+    int        size = 0;
+    GraphEdge* mst  = graph_mst_kruskal(g, edges, &size);
+    free(edges);
+    if (!mst)
+        return GRAPH_ERR_ALLOC;
+
+    for (int k = 0; k < size; k++)
+    {
+        uv[2 * k]     = mst[k].u;
+        uv[2 * k + 1] = mst[k].v;
+        w[k]          = mst[k].w;
+    }
+    free(mst);
+    return size;
+}

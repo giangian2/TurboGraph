@@ -89,8 +89,7 @@ bin/cgdiff: tools/cgdiff.c | bin
 # --- WebAssembly ---------------------------------------------------------
 # The same library sources plus the flat binding in wasm/wasm_api.c,
 # compiled with Emscripten into an ES module (bin/wasm/graphs.mjs + .wasm)
-# that wasm/turbograph.js wraps. Always -O2: it also drops the unused
-# MST_AVAILABLE_ALGORITHMS table that would otherwise need every MST symbol.
+# that wasm/turbograph.js wraps. Always -O2.
 # Memory is capped at 2GB so every pointer stays a positive int on the JS
 # side (WesternUSA, the largest input, peaks well below that).
 #
