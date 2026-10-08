@@ -77,6 +77,41 @@ static bool parse_uint(const char** p, int* out)
     return true;
 }
 
+/*
+ * Cerca l'attributo label fra le "[ ]" del resto della riga e lo legge
+ * come peso: label="1988" oppure label=1988. Ritorna False (e lascia *w
+ * invariato) se non c'e' nessuna label numerica o se vale 0.0, che in
+ * questa libreria significa "nessun arco".
+ */
+static bool parse_label_weight(const char* p, double* w)
+{
+    const char* attrs = strchr(p, '[');
+    if (!attrs)
+        return false;
+
+    for (const char* k = strstr(attrs, "label"); k; k = strstr(k + 5, "label"))
+    {
+        /* Solo la chiave intera: "xlabel" o "headlabel" non contano */
+        if (isalnum((unsigned char)k[-1]) || k[-1] == '_')
+            continue;
+
+        const char* v = skip_ws(k + 5);
+        if (*v != '=')
+            continue;
+        v = skip_ws(v + 1);
+        if (*v == '"')
+            v++;
+
+        char*  end;
+        double val = strtod(v, &end);
+        if (end == v || val == 0.0)
+            return false;
+        *w = val;
+        return true;
+    }
+    return false;
+}
+
 Graph* graph_import_dot(const char* path, GraphRepr repr)
 {
     if (!path)
@@ -135,7 +170,8 @@ Graph* graph_import_dot(const char* path, GraphRepr repr)
             continue; /* delimitatori di blocco */
 
         /* Catena "id (OP id)*", es. "3 -> 4 -> 5;" -> archi 3-4, 4-5. */
-        int prev;
+        size_t first_edge = edges.count;
+        int    prev;
         if (!parse_uint(&p, &prev))
             continue; /* riga non riconosciuta: ignorata */
         if (prev > max_id)
@@ -170,7 +206,12 @@ Graph* graph_import_dot(const char* path, GraphRepr repr)
             prev = next;
             p    = r;
         }
-        /* Il resto della riga (attributi fra [ ], ';', commenti) e' ignorato. */
+        /* La label vale per tutti gli archi della catena, il resto degli
+         * attributi, il ';' e i commenti sono ignorati. */
+        double w;
+        if (ok && edges.count > first_edge && parse_label_weight(p, &w))
+            for (size_t i = first_edge; i < edges.count; i++)
+                edges.data[i].w = w;
     }
 
     fclose(f);

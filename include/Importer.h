@@ -23,9 +23,11 @@
  *     ignorati; il file di esempio usa '%' per i commenti.
  *   - catene sulla stessa riga ("1 -> 2 -> 3;") sono supportate ed
  *     espanse nei singoli archi 1->2, 2->3.
- *   - eventuali attributi fra "[ ]" o il ';' finale sono ignorati.
+ *   - il peso dell'arco e' la label numerica fra "[ ]", es.
+ *     1 -> 2 [label="1988"]; vale per tutti gli archi della catena.
+ *     Gli altri attributi e il ';' finale sono ignorati.
  *
- * Il formato non porta pesi: ogni arco importato ha peso 1.0 (il minimo
+ * Senza label numerica (o con label 0) l'arco ha peso 1.0 (il minimo
  * valore diverso da 0.0, che in questa libreria significa "nessun arco").
  *
  * Gli identificatori dei vertici sono usati cosi' come compaiono nel file
