@@ -407,21 +407,20 @@ void traversal_cleanup(Traversal** t)
 
 GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges)
 {
-    //g->n - 1 is the MST size
+    // g->n - 1 is the MST size
     int mst_ardinality = 0;
 
-    GraphEdge* MST = (GraphEdge*)malloc(sizeof(GraphEdge)*(g->n -1));
+    GraphEdge* MST = (GraphEdge*)malloc(sizeof(GraphEdge) * (g->n - 1));
 
     QuickSort(edges, g->m, 0, g->m);
 
     LOG_DEBUG("Ordering edges done with quick sort!");
 
-    for(int i = 0; i < g->n; i++)
+    for (int i = 0; i < g->n; i++)
     {
-
     }
 
-    while(mst_ardinality < (g->n-1))
+    while (mst_ardinality < (g->n - 1))
     {
         /**
          * @todo CREATE UNION FIND
@@ -490,4 +489,3 @@ void QuickSort(GraphEdge* edges, int count, int p, int q)
 
     QuickSort(edges, count, pivot_position + 1, q);
 }
-

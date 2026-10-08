@@ -75,7 +75,7 @@ void        traversal_cleanup(Traversal** t);
 
 /* ---- ordering utils --------------------------------------------- */
 void QuickSort(GraphEdge* edges, int count, int p, int q);
-int partition(GraphEdge* edges, int count, int p, int q);
+int  partition(GraphEdge* edges, int count, int p, int q);
 
 /* ---- algorithms ------------------------------------------------- */
 GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges);
