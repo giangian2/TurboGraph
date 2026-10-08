@@ -11,18 +11,19 @@
 #define DHEAP_DEFAULT_D 4 // best or close to it on the road graphs benchmarks
 
 /**
- *  Generic d-ary heap, T must be a struct with a field `id` of type int:
- *  ids are used to index the lookup array, so they must be in [0, n_ids).
+ *  Generic d-ary heap, T must be a struct with a field `id` of type int in
+ *  [0, capacity): ids index the pos array.
  *  The order is given only by cmp: cmp(a, b) < 0 means a stays closer to
  *  the root than b, so the same code works as min-heap or max-heap.
  *
  *  Memory layout (single malloc, shadow header):
  *
- *    [ dheap_header_t | T elems[capacity] | T scratch | int lookup[n_ids] ]
+ *    [ dheap_header_t | T elems[capacity] | T scratch | int pos[capacity] ]
  *                       ^-- pointer handed to the user (T*), h[0] is the top
  *
- *  lookup[id] = heap position of id, -1 if not in the heap.
- *  scratch is the temporary of the swap.
+ *  pos[id] = heap position of id, -1 if not in the heap.
+ *  scratch is the temporary of the swap: one spare T, since the type is not
+ *  known inside the functions and a T tmp cannot be declared.
  *
  *  cmp, sizeof(T) and the offset of id are passed by the macros to every
  *  operation as constants: once inlined the compiler inlines cmp and the
@@ -30,7 +31,7 @@
  *  cmp must always be the same given to dheap_create (checked in debug).
  *
  *    typedef struct { double w; int id; } Node;
- *    Node* h = dheap_create(n, DHEAP_DEFAULT_D, n, node_cmp, Node);
+ *    Node* h = dheap_create(n, DHEAP_DEFAULT_D, node_cmp, Node);
  *    dheap_insert(h, ((Node){ 3.5, 7 }), node_cmp);
  *    dheap_update(h, ((Node){ 1.0, 7 }), node_cmp);
  *    Node top;
@@ -52,8 +53,7 @@ typedef struct
     size_t    size;
     size_t    d; // branching factor
     size_t    elem_size;
-    size_t    n_ids; // length of lookup
-    dheap_cmp cmp;   // debug check only
+    dheap_cmp cmp; // debug check only
 } dheap_header_t;
 
 // Compile error if the two pointers have different types
@@ -63,8 +63,7 @@ typedef struct
 // Offset in bytes of id inside T, computed from the pointer (nothing is read)
 #define DHEAP__ID_OFF(h) ((size_t)((char*)&(h)->id - (char*)(h)))
 
-#define dheap_create(cap, d, n_ids, cmp, T)                                                        \
-    (DHEAP__CHECK_ID(T), (T*)dheap__create(cap, d, n_ids, cmp, sizeof(T)))
+#define dheap_create(cap, d, cmp, T) (DHEAP__CHECK_ID(T), (T*)dheap__create(cap, d, cmp, sizeof(T)))
 #define dheap_free(h) (dheap__free(DHEAP__HDR(h)))
 #define dheap_size(h) (DHEAP__HDR(h)->size)
 #define dheap_empty(h) (DHEAP__HDR(h)->size == 0)
@@ -94,7 +93,7 @@ static inline void* dheap__scratch(dheap_header_t* dheap_h)
     return (void*)((char*)(dheap_h + 1) + dheap_h->capacity * dheap_h->elem_size);
 }
 
-static inline D_HEAP_ID_TYPE* dheap__lookup(dheap_header_t* dheap_h)
+static inline D_HEAP_ID_TYPE* dheap__pos(dheap_header_t* dheap_h)
 {
     return (D_HEAP_ID_TYPE*)((char*)(dheap_h + 1) + (dheap_h->capacity + 1) * dheap_h->elem_size);
 }
@@ -102,6 +101,17 @@ static inline D_HEAP_ID_TYPE* dheap__lookup(dheap_header_t* dheap_h)
 static inline D_HEAP_ID_TYPE dheap__get_id(const void* elem, size_t id_off)
 {
     return *(const D_HEAP_ID_TYPE*)((const char*)elem + id_off);
+}
+
+// Checked read of pos, for ids coming from the user
+static inline D_HEAP_ID_TYPE dheap__position(dheap_header_t* h, D_HEAP_ID_TYPE id)
+{
+    if (id < 0 || (size_t)id >= h->capacity)
+    {
+        return -1;
+    }
+
+    return dheap__pos(h)[id];
 }
 
 static inline size_t dheap__parent(const dheap_header_t* dheap_h, size_t i)
@@ -120,27 +130,27 @@ static inline void dheap__swap(dheap_header_t* dheap_h, size_t a_indx, size_t b_
 {
     assert(a_indx < dheap_h->size && b_indx < dheap_h->size);
 
-    char*           data   = (char*)dheap__values(dheap_h);
-    D_HEAP_ID_TYPE* lookup = dheap__lookup(dheap_h);
-    void*           tmp    = dheap__scratch(dheap_h);
-    char*           a      = data + a_indx * es;
-    char*           b      = data + b_indx * es;
+    char*           data = (char*)dheap__values(dheap_h);
+    D_HEAP_ID_TYPE* pos  = dheap__pos(dheap_h);
+    void*           tmp  = dheap__scratch(dheap_h);
+    char*           a    = data + a_indx * es;
+    char*           b    = data + b_indx * es;
 
     memcpy(tmp, a, es);
     memcpy(a, b, es);
     memcpy(b, tmp, es);
 
-    lookup[dheap__get_id(a, id_off)] = (D_HEAP_ID_TYPE)a_indx;
-    lookup[dheap__get_id(b, id_off)] = (D_HEAP_ID_TYPE)b_indx;
+    pos[dheap__get_id(a, id_off)] = (D_HEAP_ID_TYPE)a_indx;
+    pos[dheap__get_id(b, id_off)] = (D_HEAP_ID_TYPE)b_indx;
 }
 
-static inline void* dheap__create(size_t capacity, size_t branching_factor, size_t n_ids,
-                                  dheap_cmp cmp, size_t elem_size)
+static inline void* dheap__create(size_t capacity, size_t branching_factor, dheap_cmp cmp,
+                                  size_t elem_size)
 {
     assert(branching_factor >= 1 && cmp != NULL);
 
     dheap_header_t* dheap = (dheap_header_t*)malloc(
-        sizeof(dheap_header_t) + (capacity + 1) * elem_size + n_ids * sizeof(D_HEAP_ID_TYPE));
+        sizeof(dheap_header_t) + (capacity + 1) * elem_size + capacity * sizeof(D_HEAP_ID_TYPE));
     if (dheap == NULL)
     {
         return NULL;
@@ -150,11 +160,10 @@ static inline void* dheap__create(size_t capacity, size_t branching_factor, size
     dheap->size      = 0;
     dheap->d         = branching_factor;
     dheap->elem_size = elem_size;
-    dheap->n_ids     = n_ids;
     dheap->cmp       = cmp;
 
     // 0xFF bytes = -1: no id in the heap
-    memset(dheap__lookup(dheap), 0xFF, n_ids * sizeof(D_HEAP_ID_TYPE));
+    memset(dheap__pos(dheap), 0xFF, capacity * sizeof(D_HEAP_ID_TYPE));
 
     return dheap + 1;
 }
@@ -231,30 +240,20 @@ static inline size_t dheap__move_up(dheap_header_t* h, size_t i, dheap_cmp cmp, 
     return i;
 }
 
-static inline D_HEAP_ID_TYPE dheap__position(dheap_header_t* h, D_HEAP_ID_TYPE id)
-{
-    if (id < 0 || (size_t)id >= h->n_ids)
-    {
-        return -1;
-    }
-
-    return dheap__lookup(h)[id];
-}
-
 static inline int dheap__insert(dheap_header_t* h, const void* elem, dheap_cmp cmp, size_t es,
                                 size_t id_off)
 {
-    D_HEAP_ID_TYPE  id     = dheap__get_id(elem, id_off);
-    D_HEAP_ID_TYPE* lookup = dheap__lookup(h);
+    D_HEAP_ID_TYPE  id  = dheap__get_id(elem, id_off);
+    D_HEAP_ID_TYPE* pos = dheap__pos(h);
 
-    if (h->size >= h->capacity || id < 0 || (size_t)id >= h->n_ids || lookup[id] != -1)
+    if (id < 0 || (size_t)id >= h->capacity || pos[id] != -1)
     {
         return DHEAP_ERR;
     }
 
     size_t i = h->size++;
     memcpy((char*)dheap__values(h) + i * es, elem, es);
-    lookup[id] = (D_HEAP_ID_TYPE)i;
+    pos[id] = (D_HEAP_ID_TYPE)i;
 
     dheap__move_up(h, i, cmp, es, id_off);
 
@@ -268,18 +267,18 @@ static inline int dheap__pop(dheap_header_t* h, void* out, dheap_cmp cmp, size_t
         return DHEAP_ERR;
     }
 
-    char*           data   = (char*)dheap__values(h);
-    D_HEAP_ID_TYPE* lookup = dheap__lookup(h);
+    char*           data = (char*)dheap__values(h);
+    D_HEAP_ID_TYPE* pos  = dheap__pos(h);
 
     memcpy(out, data, es);
-    lookup[dheap__get_id(data, id_off)] = -1;
+    pos[dheap__get_id(data, id_off)] = -1;
     h->size--;
 
     // Last leaf goes to the root and sinks
     if (h->size > 0)
     {
         memcpy(data, data + h->size * es, es);
-        lookup[dheap__get_id(data, id_off)] = 0;
+        pos[dheap__get_id(data, id_off)] = 0;
 
         dheap__move_down(h, 0, cmp, es, id_off);
     }
@@ -290,18 +289,18 @@ static inline int dheap__pop(dheap_header_t* h, void* out, dheap_cmp cmp, size_t
 static inline int dheap__update(dheap_header_t* h, const void* elem, dheap_cmp cmp, size_t es,
                                 size_t id_off)
 {
-    D_HEAP_ID_TYPE pos = dheap__position(h, dheap__get_id(elem, id_off));
-    if (pos < 0)
+    D_HEAP_ID_TYPE p = dheap__position(h, dheap__get_id(elem, id_off));
+    if (p < 0)
     {
         return DHEAP_ERR;
     }
 
-    memcpy((char*)dheap__values(h) + (size_t)pos * es, elem, es);
+    memcpy((char*)dheap__values(h) + (size_t)p * es, elem, es);
 
     // The new key can move it both ways
-    if (dheap__move_up(h, (size_t)pos, cmp, es, id_off) == (size_t)pos)
+    if (dheap__move_up(h, (size_t)p, cmp, es, id_off) == (size_t)p)
     {
-        dheap__move_down(h, (size_t)pos, cmp, es, id_off);
+        dheap__move_down(h, (size_t)p, cmp, es, id_off);
     }
 
     return DHEAP_OK;
