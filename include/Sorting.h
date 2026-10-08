@@ -5,6 +5,5 @@
 
 int  partition(GraphEdge* edges, int count, int p, int q);
 void QuickSort(GraphEdge* edges, int count, int p, int q);
-void QuickSortKruskalMST(GraphEdge* edges, int count, int p, int q);
 
 #endif /* GRAPH_SORTING_H */

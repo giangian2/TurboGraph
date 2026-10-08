@@ -1,17 +1,13 @@
 #include "../include/Sorting.h"
 #include "../include/Debug.h"
 #include "../include/Graph.h"
+#include <stdbool.h>
 
-/* Hoare-scheme partition (NOT Lomuto): the pivot value is edges[p].w and is
- * never swapped out before scanning starts. e_minus/e_plus close in from
- * both ends until they cross; the returned index is a SPLIT POINT, not the
- * pivot's final sorted slot. edges[p..return] are all <= pivot and
- * edges[return+1..q] are all >= pivot, but the element sitting at the
- * returned index has no guarantee of already being in its final position
- * and must still be included in further sorting (see QuickSort below).
- * Safety note: the original pivot value always remains somewhere inside
- * [p,q] and acts as a sentinel that halts both inner while-loops, so
- * e_minus/e_plus can never scan past the p/q bounds. */
+/* Hoare partition (CLRS): the pivot value edges[p].w is saved up front,
+ * since the swaps can move the element sitting at p. The returned index is
+ * a SPLIT POINT, not the pivot's final slot: edges[p..j] are all <= pivot
+ * and edges[j+1..q] are all >= pivot, and j < q always holds, so both
+ * halves of the recursion are strictly smaller than [p, q]. */
 int partition(GraphEdge* edges, int count, int p, int q)
 {
     // Handle edge cases
@@ -21,34 +17,32 @@ int partition(GraphEdge* edges, int count, int p, int q)
         return -1;
     }
 
-    int e_minus = p;
-    int e_plus  = q;
+    double pivot   = edges[p].w;
+    int    e_minus = p - 1;
+    int    e_plus  = q + 1;
 
-    while (e_minus < e_plus)
+    while (true)
     {
-        while (edges[e_plus].w > edges[p].w)
+        do
         {
             e_plus--;
-        }
+        } while (edges[e_plus].w > pivot);
 
-        while (edges[e_minus].w < edges[p].w)
+        do
         {
             e_minus++;
-        }
+        } while (edges[e_minus].w < pivot);
 
-        if (e_minus < e_plus)
+        if (e_minus >= e_plus)
         {
-            // SWAP
-            GraphEdge tmp  = edges[e_minus];
-            edges[e_minus] = edges[e_plus];
-            edges[e_plus]  = tmp;
-
-            e_minus++;
-            e_plus--;
+            return e_plus;
         }
+
+        // SWAP
+        GraphEdge tmp  = edges[e_minus];
+        edges[e_minus] = edges[e_plus];
+        edges[e_plus]  = tmp;
     }
-
-    return e_plus;
 }
 
 void QuickSort(GraphEdge* edges, int count, int p, int q)
@@ -72,16 +66,4 @@ void QuickSort(GraphEdge* edges, int count, int p, int q)
     QuickSort(edges, count, p, pivot_position);
 
     QuickSort(edges, count, pivot_position + 1, q);
-}
-
-/*
- * Same algorithm as QuickSort() above -- same partition(), same split
- * point, same recursion -- kept under its own name because Kruskal's MST
- * callers sort their edge list through it; there is nothing MST-specific
- * about the sort itself, so it is a thin alias rather than a second copy
- * of the recursion to keep in sync.
- */
-void QuickSortKruskalMST(GraphEdge* edges, int count, int p, int q)
-{
-    QuickSort(edges, count, p, q);
 }
