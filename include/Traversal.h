@@ -73,11 +73,13 @@ void        traversal_cleanup(Traversal** t);
 
 /* ---- MST -------------------------------------------------------- */
 
-/* ---- ordering utils --------------------------------------------- */
-void QuickSort(GraphEdge* edges, int count, int p, int q);
-int  partition(GraphEdge* edges, int count, int p, int q);
-
 /* ---- algorithms ------------------------------------------------- */
-GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges);
+/*
+ * Kruskal on an undirected graph. edges holds the g->m edges of g, each
+ * once, and gets sorted by weight in place. Returns a malloc'd array of the
+ * spanning forest edges (to free()), *mst_size receives its length: n - 1
+ * if g is connected, n - #components otherwise. NULL on error or directed g.
+ */
+GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
 
 #endif /* TRAVERSAL_H */
