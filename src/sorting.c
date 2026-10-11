@@ -93,6 +93,85 @@ void graph_edges_partial_quick_sort(GraphEdge* edges, int count, int p, int q, i
     stack_free(stack);
 }
 
+bool graph_edges_quick_sort_iter_init(quick_sort_iter* it, GraphEdge* edges, int count)
+{
+    if (it == NULL || edges == NULL || count <= 0)
+    {
+        LOG_ERROR("invalid iterator arguments (count=%d)", count);
+        return false;
+    }
+
+    /* Pending ranges are pairwise disjoint and non-empty, so at most count
+     * of them can be on the stack at the same time. */
+    it->edges = edges;
+    it->count = count;
+    it->stack = stack_create(quick_sort_frame, count);
+
+    if (!it->stack)
+    {
+        LOG_ERROR("stack allocation failed (count=%d)", count);
+        return false;
+    }
+
+    quick_sort_frame frame = {.p = 0, .q = count - 1};
+    stack_push(it->stack, frame);
+
+    return true;
+}
+
+/* Lazy quicksort: each call does only the partitions needed to settle the
+ * next slot and returns it. Ranges are popped left to right, so the first
+ * single-element range found is the smallest edge not yet returned, and it
+ * is already in its final slot (later partitions only touch ranges to its
+ * right): the returned pointer stays valid. NULL once every edge has been
+ * returned. */
+GraphEdge* graph_edges_quick_sort_step(quick_sort_iter* it)
+{
+    if (it == NULL || it->stack == NULL)
+        return NULL;
+
+    while (!stack_is_empty(it->stack))
+    {
+        quick_sort_frame frame = stack_pop(it->stack);
+
+        // EMPTY RANGE: never produced by Hoare halves, only guards the initial frame
+        if (frame.p > frame.q)
+            continue;
+
+        // BASE: a single element is in its final slot
+        if (frame.p == frame.q)
+            return &it->edges[frame.p];
+
+        int pivot_position = graph_edges_partition(it->edges, it->count, frame.p, frame.q);
+
+        if (pivot_position < 0)
+            return NULL;
+
+        /**
+         * SINCE WE ARE USING A STACK, WE NEED TO PUSH FIRST THE RIGHT PART
+         * AND THEN THE LEFT PART, IN THIS WAY LEFT-PARTITIONS ARE EXECUTED
+         * FIRST
+         */
+        quick_sort_frame right = {.p = pivot_position + 1, .q = frame.q};
+        stack_push(it->stack, right);
+
+        quick_sort_frame left = {.p = frame.p, .q = pivot_position};
+        stack_push(it->stack, left);
+    }
+
+    return NULL;
+}
+
+void graph_edges_quick_sort_iter_cleanup(quick_sort_iter* it)
+{
+    if (it != NULL && it->stack != NULL)
+    {
+        stack_free(it->stack);
+        it->stack = NULL;
+        LOG_DEBUG("quick sort iterator freed");
+    }
+}
+
 void graph_edges_quick_sort(GraphEdge* edges, int count, int p, int q)
 {
     quick_sort_frame* stack = stack_create(quick_sort_frame, count);
