@@ -80,9 +80,9 @@ void        traversal_cleanup(Traversal** t);
  * spanning forest edges (to free()), *mst_size receives its length: n - 1
  * if g is connected, n - #components otherwise. NULL on error or directed g.
  */
-GraphEdge* graph_mst_kruskal            (const Graph* g, GraphEdge* edges, int* mst_size);
-GraphEdge* graph_mst_quick_kruskal      (const Graph* g, GraphEdge* edges, int* mst_size);
-GraphEdge* graph_mst_quick_star_kruskal (const Graph* g, GraphEdge* edges, int* mst_size);
-GraphEdge* graph_mst_prim               (const Graph* g, GraphEdge* edges, int* mst_size);
+GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
+GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
+GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
+GraphEdge* graph_mst_prim(const Graph* g, GraphEdge* edges, int* mst_size);
 
 #endif /* TRAVERSAL_H */
