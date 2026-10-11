@@ -429,7 +429,7 @@ GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
         return NULL;
     }
 
-    QuickSort(edges, (int)g->m, 0, (int)g->m - 1);
+    graph_edges_quick_sort(edges, (int)g->m, 0, (int)g->m - 1);
 
     LOG_DEBUG("Ordering edges done with quick sort!");
 

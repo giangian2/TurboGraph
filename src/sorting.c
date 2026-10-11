@@ -8,7 +8,7 @@
  * a SPLIT POINT, not the pivot's final slot: edges[p..j] are all <= pivot
  * and edges[j+1..q] are all >= pivot, and j < q always holds, so both
  * halves of the recursion are strictly smaller than [p, q]. */
-int partition(GraphEdge* edges, int count, int p, int q)
+int graph_edges_partition(GraphEdge* edges, int count, int p, int q)
 {
     // Handle edge cases
     if (p < 0 || q >= count)
@@ -45,7 +45,10 @@ int partition(GraphEdge* edges, int count, int p, int q)
     }
 }
 
-void QuickSort(GraphEdge* edges, int count, int p, int q)
+/**
+ * @todo REBUILD IT IN ITERATIVE APPROACH
+ */
+void graph_edges_quick_sort(GraphEdge* edges, int count, int p, int q)
 {
     // BASE
     if (p >= q)
@@ -55,7 +58,7 @@ void QuickSort(GraphEdge* edges, int count, int p, int q)
 
     LOG_DEBUG("sorting range [%d, %d]", p, q);
 
-    int pivot_position = partition(edges, count, p, q);
+    int pivot_position = graph_edges_partition(edges, count, p, q);
 
     /* Because partition() uses the Hoare scheme, pivot_position is only a
      * split point, not the pivot's final index: the element at
@@ -63,7 +66,7 @@ void QuickSort(GraphEdge* edges, int count, int p, int q)
      * included in the left recursive call (range [p, pivot_position]).
      * Using [p, pivot_position-1] here would silently skip that element
      * from both halves and leave the array unsorted. */
-    QuickSort(edges, count, p, pivot_position);
+    graph_edges_quick_sort(edges, count, p, pivot_position);
 
-    QuickSort(edges, count, pivot_position + 1, q);
+    graph_edges_quick_sort(edges, count, pivot_position + 1, q);
 }
