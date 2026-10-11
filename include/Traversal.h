@@ -73,12 +73,6 @@ void        traversal_cleanup(Traversal** t);
 
 /* ---- MST -------------------------------------------------------- */
 
-/* ---- ordering utils --------------------------------------------- */
-/* Sorts edges[p..q] by weight in place (Hoare quicksort, src/sorting.c) */
-int  graph_edges_partition          (GraphEdge* edges, int count, int p, int q);
-void graph_edges_quick_sort         (GraphEdge* edges, int count, int p, int q);
-int  graph_edges_quick_sort_step    (GraphEdge* edges, int count, int p, int q);
-
 /* ---- algorithms ------------------------------------------------- */
 /*
  * Kruskal on an undirected graph. edges holds the g->m edges of g, each
