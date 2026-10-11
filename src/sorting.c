@@ -46,6 +46,53 @@ int graph_edges_partition(GraphEdge* edges, int count, int p, int q)
     }
 }
 
+/* Sorts only the first k slots of edges[p..q]: on return edges[p..k-1]
+ * hold the k smallest weights in order, the tail is left unsorted. k is an
+ * ABSOLUTE index, as p and q are. */
+void graph_edges_partial_quick_sort(GraphEdge* edges, int count, int p, int q, int k)
+{
+    // we keep a stack of pending ranges: the right half is pushed before the left one, so ranges
+    // are popped left to right
+    quick_sort_frame* stack = stack_create(quick_sort_frame, count);
+
+    if (!stack)
+        return;
+
+    quick_sort_frame frame = {.p = p, .q = q};
+
+    stack_push(stack, frame);
+
+    while (!stack_is_empty(stack))
+    {
+        frame = stack_pop(stack);
+
+        // STOP CONDITION: ranges come out left to right, so every pending one lies past k too
+        if (frame.p >= k)
+            break;
+
+        // BASE
+        if (frame.p >= frame.q)
+            continue;
+
+        int pivot_position = graph_edges_partition(edges, count, frame.p, frame.q);
+
+        if (pivot_position < 0)
+            break;
+
+        // IF NEEDED FIRST WE PUSH THE RIGHT SIDE, SO THE LEFT REMAINS AT TOP OF STACK
+        if (pivot_position + 1 < k)
+        {
+            quick_sort_frame right = {.p = pivot_position + 1, .q = frame.q};
+            stack_push(stack, right);
+        }
+
+        quick_sort_frame left = {.p = frame.p, .q = pivot_position};
+        stack_push(stack, left);
+    }
+
+    stack_free(stack);
+}
+
 void graph_edges_quick_sort(GraphEdge* edges, int count, int p, int q)
 {
     quick_sort_frame* stack = stack_create(quick_sort_frame, count);
