@@ -4,6 +4,8 @@
 #include "../include/Sorting.h"
 #include "../include/Stack.h"
 #include "../include/UnionFInd.h"
+#include "internal.h"
+#include "star.h"
 #include <stdio.h>
 /* One frame per vertex on the DFS path, iterator included: that cursor
  * is the whole point -- it is what a recursive DFS keeps implicitly in
@@ -84,8 +86,10 @@ static void traversal_reset(Traversal* t)
  *           order Kosaraju's second pass needs (and, on a DAG, a
  *           topological order).
  */
-static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, int* rpost,
-                      int* rpost_next)
+static inline __attribute__((always_inline)) void dfs_visit_with(const Graph* g, int root,
+                                                                 Traversal* t, dfs_frame* stack,
+                                                                 int* rpost, int* rpost_next,
+                                                                 IterOutFn expand, IterNextFn next)
 {
     /* The root is the starting point: distance 0 from itself,
      * no parent (stays -1), first vertex of its tree in the visit order. */
@@ -94,7 +98,7 @@ static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, 
 
     dfs_frame _root_frame = {0};
     _root_frame.vertex_id = root;
-    g->ops->iter_out(g, root, &_root_frame.it);
+    expand(g, root, &_root_frame.it);
     stack_push(stack, _root_frame);
 
     /*
@@ -120,7 +124,7 @@ static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, 
 
         /* Adjacency exhausted: this vertex is done (this is its finish
          * time), backtrack to its parent. */
-        if (!g->ops->iter_next(&_top_frame->it, &v, NULL))
+        if (!next(&_top_frame->it, &v, NULL))
         {
             if (rpost)
                 rpost[--*rpost_next] = _top_frame->vertex_id;
@@ -144,9 +148,28 @@ static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, 
 
         dfs_frame child = {0};
         child.vertex_id = v;
-        g->ops->iter_out(g, v, &child.it);
+        expand(g, v, &child.it);
         stack_push(stack, child);
     }
+}
+
+/* Star instance: the iterators are inline constants here, so the arc loop
+ * has no call left in it. */
+static void dfs_visit_star(const Graph* g, int root, Traversal* t, dfs_frame* stack, int* rpost,
+                           int* rpost_next)
+{
+    dfs_visit_with(g, root, t, stack, rpost, rpost_next, star_iter_out, star_iter_next);
+}
+
+/* DISPATCH: once per visit, never per arc. Any other representation goes
+ * through its vtable, one indirect call per arc. */
+static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, int* rpost,
+                      int* rpost_next)
+{
+    if (g->repr == GRAPH_STAR)
+        dfs_visit_star(g, root, t, stack, rpost, rpost_next);
+    else
+        dfs_visit_with(g, root, t, stack, rpost, rpost_next, g->ops->iter_out, g->ops->iter_next);
 }
 
 /*
@@ -162,10 +185,9 @@ static void dfs_visit(const Graph* g, int root, Traversal* t, dfs_frame* stack, 
  * frame, so whenever only the set of reached vertices matters -- not the
  * order in which they finish -- this is the cheaper visit.
  */
-static void bfs_visit(const Graph* g, int root, bool in, Traversal* t)
+static inline __attribute__((always_inline)) void
+bfs_visit_with(const Graph* g, int root, Traversal* t, IterOutFn expand, IterNextFn next)
 {
-    void (*expand)(const Graph*, int, GraphIter*) = in ? g->ops->iter_in : g->ops->iter_out;
-
     /* The root is the starting point: distance 0 from itself,
      * no parent (stays -1), first vertex of its tree in the visit order. */
     int head             = t->count;
@@ -183,7 +205,7 @@ static void bfs_visit(const Graph* g, int root, bool in, Traversal* t)
         expand(g, u, &it);
 
         int v;
-        while (g->ops->iter_next(&it, &v, NULL))
+        while (next(&it, &v, NULL))
         { /* weight ignored */
             if (t->dist[v] != -1)
                 continue; /* already discovered via an equal-or-shorter path */
@@ -195,6 +217,31 @@ static void bfs_visit(const Graph* g, int root, bool in, Traversal* t)
             t->order[t->count++] = v;
         }
     }
+}
+
+/* Star instances, one per direction: each gets its iterator inlined. */
+static void bfs_visit_star_out(const Graph* g, int root, Traversal* t)
+{
+    bfs_visit_with(g, root, t, star_iter_out, star_iter_next);
+}
+
+static void bfs_visit_star_in(const Graph* g, int root, Traversal* t)
+{
+    bfs_visit_with(g, root, t, star_iter_in, star_iter_next);
+}
+
+/* DISPATCH: once per visit, never per arc (see dfs_visit). */
+static void bfs_visit(const Graph* g, int root, bool in, Traversal* t)
+{
+    if (g->repr == GRAPH_STAR)
+    {
+        if (in)
+            bfs_visit_star_in(g, root, t);
+        else
+            bfs_visit_star_out(g, root, t);
+        return;
+    }
+    bfs_visit_with(g, root, t, in ? g->ops->iter_in : g->ops->iter_out, g->ops->iter_next);
 }
 
 /*
@@ -416,8 +463,8 @@ GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
     *mst_size = 0;
 
     // The MST has at most n - 1 edges: fewer when g is disconnected (a forest)
-    size_t     max_edges = g->n > 1 ? (size_t)(g->n - 1) : 1;
-    GraphEdge* MST       = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
+    size_t     max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
+    GraphEdge* MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
     int*       union_find = uf_create(g->n);
     if (MST == NULL || union_find == NULL)
     {
@@ -447,4 +494,3 @@ GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
     uf_free(union_find);
     return MST;
 }
-
