@@ -1,6 +1,7 @@
 #include "../include/Sorting.h"
 #include "../include/Debug.h"
 #include "../include/Graph.h"
+#include "../include/Stack.h"
 #include <stdbool.h>
 
 /* Hoare partition (CLRS): the pivot value edges[p].w is saved up front,
@@ -45,28 +46,40 @@ int graph_edges_partition(GraphEdge* edges, int count, int p, int q)
     }
 }
 
-/**
- * @todo REBUILD IT IN ITERATIVE APPROACH
- */
 void graph_edges_quick_sort(GraphEdge* edges, int count, int p, int q)
 {
-    // BASE
-    if (p >= q)
-    {
+    quick_sort_frame* stack = stack_create(quick_sort_frame, count);
+
+    if (!stack)
         return;
+
+    quick_sort_frame frame = {.p = p, .q = q};
+
+    stack_push(stack, frame);
+
+    while (!stack_is_empty(stack))
+    {
+        frame = stack_pop(stack);
+        // BASE
+        if (frame.p >= frame.q)
+            continue;
+
+        int pivot_position = graph_edges_partition(edges, count, frame.p, frame.q);
+
+        if (pivot_position < 0)
+            break;
+
+        /**
+         * SINCE WE ARE USING A STACK, WE NEED TO PUSH FIRST THE RIGHT PART
+         * AND THEN THE LEFT PART, IN THIS WAY LEFT-PARTITIONS ARE EXECUTED
+         * FIRST
+         */
+        quick_sort_frame right = {.p = pivot_position + 1, .q = frame.q};
+        stack_push(stack, right);
+
+        quick_sort_frame left = {.p = frame.p, .q = pivot_position};
+        stack_push(stack, left);
     }
 
-    LOG_DEBUG("sorting range [%d, %d]", p, q);
-
-    int pivot_position = graph_edges_partition(edges, count, p, q);
-
-    /* Because partition() uses the Hoare scheme, pivot_position is only a
-     * split point, not the pivot's final index: the element at
-     * pivot_position is NOT guaranteed to be already sorted, so it must be
-     * included in the left recursive call (range [p, pivot_position]).
-     * Using [p, pivot_position-1] here would silently skip that element
-     * from both halves and leave the array unsorted. */
-    graph_edges_quick_sort(edges, count, p, pivot_position);
-
-    graph_edges_quick_sort(edges, count, pivot_position + 1, q);
+    stack_free(stack);
 }
