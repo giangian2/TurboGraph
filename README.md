@@ -40,6 +40,25 @@ TurboGraph takes the opposite approach. It treats memory layout and the cost
 of every instruction in the inner loops as design decisions, not
 afterthoughts.
 
+### Why C
+
+- **Close to the hardware.** The engine controls exactly how a graph sits in
+  memory, which code the compiler can see and inline, and what stays in
+  registers. Nothing runs behind your back: no garbage collector, no
+  implicit bounds checks, no hidden dispatch.
+- **No fight with the language.** The structures at the heart of the engine
+  are raw by nature: position-independent blocks addressed by byte offsets,
+  arrays reinterpreted in place, hand-written context switches. In Rust they
+  would mean `unsafe` blocks everywhere, which gives up most of what the
+  language offers while keeping its cost in complexity. In C they are simply
+  the normal way to write code.
+- **As portable as possible.** A C11 library with no dependencies can be
+  built by almost every toolchain, on almost every platform, and embedded
+  in almost every other language through a plain C ABI.
+- **Ready for the browser.** The same sources are meant to compile to
+  WebAssembly, so the engine can run client-side, in the browser, behind a
+  public API (see the roadmap).
+
 ## Design
 
 ### CSR first
@@ -56,6 +75,13 @@ engine is optimized around:
   file, a socket, or device memory.
 - **Built in O(n + m).** The constructor is a counting sort, with no
   temporary allocations.
+- **Designed for the GPU.** Because the block is contiguous and holds no
+  pointers, it moves to CUDA device memory as it is: a single copy of the
+  block, with no conversion, no serialization and no pointer fix-up. Once it
+  is there, preparing it for a kernel takes O(1) work, because the device
+  only needs the base address and the offsets in the header. GPU algorithms
+  will run on this same layout and be used whenever a GPU is available,
+  with the CPU path as the fallback.
 
 Two other representations share the same interface, for the cases where CSR
 does not fit:
@@ -177,9 +203,14 @@ over the four sample graphs, in both STAR and LIST).
 3. **Codebase knowledge graphs.** Turn whole repositories into graphs (ASTs,
    symbols, call and definition relations, dependencies) and expose fast
    structural queries to AI agents.
-4. **Analytics.** Shortest paths at scale (contraction hierarchies),
-   PageRank-style iterations, and GPU kernels on the same position
-   independent CSR block.
+4. **Analytics.** Shortest paths at scale (contraction hierarchies) and
+   PageRank-style iterations.
+5. **GPU.** CUDA versions of the parallel-friendly algorithms (BFS, SSSP,
+   connected components, PageRank), running on the same CSR block copied to
+   the device as it is. They are chosen automatically when a GPU is present.
+6. **WebAssembly.** A WebAssembly build of the library, with a public API,
+   so the engine can run in the browser. This is not in the current branch
+   yet.
 
 ## Building
 
