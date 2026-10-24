@@ -17,7 +17,7 @@ CFLAGS += -DDEBUG
 endif
 
 # library sources (main.c is NOT part of the library)
-# DHeap.h, FibHeap.h, UnionFInd.h and hashmap.h are single headers: nothing to compile
+# DHeap.h, FibHeap.h, AVL.h, UnionFInd.h and hashmap.h are single headers: nothing to compile
 SRC = src/graph.c src/list.c src/star_impl.c src/matrix_impl.c src/queue.c src/stack.c \
       src/importer.c src/traversal.c src/export.c src/sorting.c
 HDR = $(wildcard include/*.h) $(wildcard src/*.h)
