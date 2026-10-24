@@ -7,6 +7,8 @@
 #include "internal.h"
 #include "star.h"
 #include <stdio.h>
+
+
 /* One frame per vertex on the DFS path, iterator included: that cursor
  * is the whole point -- it is what a recursive DFS keeps implicitly in
  * its activation record. */
@@ -450,6 +452,44 @@ void traversal_cleanup(Traversal** t)
         *t = NULL;
         LOG_DEBUG("Traversal freed");
     }
+}
+
+GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+{
+    if (g == NULL || edges == NULL || mst_size == NULL || g->directed)
+    {
+        LOG_ERROR("Kruskal needs an undirected graph and non NULL arguments");
+        return NULL;
+    }
+
+    *mst_size = 0;
+
+    size_t     max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
+    GraphEdge* MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
+    int*       union_find = uf_create(g->n);
+    if (MST == NULL || union_find == NULL)
+    {
+        free(MST);
+        if (union_find != NULL)
+        {
+            uf_free(union_find);
+        }
+        return NULL;
+    }
+
+    quick_sort_iter* sorting;
+    graph_edges_quick_sort_iter_init(sorting, edges, g->m);
+
+    for (size_t i = 0; *mst_size < g->n - 1 && i < g->m; i++)
+    {
+        GraphEdge* min_edge_i = graph_edges_quick_sort_step(sorting);
+        // A merge happens only if u and v were in different trees: no cycle
+        if (uf_union(union_find, min_edge_i->u, min_edge_i->v))
+        {
+            MST[(*mst_size)++] = *min_edge_i;
+        }
+    }
+
 }
 
 GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
