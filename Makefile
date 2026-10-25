@@ -33,7 +33,7 @@ all: $(LIB) bin/main
 
 # your program, linked against the library
 bin/main: src/main.c $(LIB) | bin
-	$(CC) $(CFLAGS) $< -Lbin -lgraph -o $@
+	$(CC) $(CFLAGS) $< -Lbin -lgraph -lm -o $@
 
 $(LIB): $(OBJ) | bin
 	ar rcs $@ $^
