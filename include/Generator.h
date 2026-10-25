@@ -14,10 +14,12 @@
 #include "Graph.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+
 
 /* Positions and values are arc indices in [0, m), m = n(n-1) is past
  * INT_MAX already at n ~ 46k: 64 bits. No padding in the struct, the
@@ -56,6 +58,39 @@ static inline int64_t random_int64(uint64_t* state, int64_t min, int64_t max)
     return min + (int64_t)(r % range);
 }
 
+/* Arc index -> (u, v). Directed: id = u(n-1) + r, r skips the diagonal.
+ * Undirected: pairs u < v in colex order, id = v(v-1)/2 + u, so the
+ * row v is the largest with v(v-1)/2 <= id. The double sqrt is off by
+ * one for big ids: the two loops put v back in place. */
+static inline GraphEdge edge_from_id(int64_t id, int n, bool directed)
+{
+    GraphEdge e = {.w = 1.0};
+
+    if (directed)
+    {
+        int64_t u = id / (n - 1);
+        int64_t r = id % (n - 1);
+        e.u       = (int)u;
+        e.v       = (int)(r < u ? r : r + 1);
+        return e;
+    }
+
+    int64_t v = (int64_t)((1.0 + sqrt(1.0 + 8.0 * (double)id)) / 2.0);
+    while (v * (v - 1) / 2 > id)
+    {
+        v--;
+    }
+    while ((v + 1) * v / 2 <= id)
+    {
+        v++;
+    }
+
+    e.u = (int)(id - v * (v - 1) / 2);
+    e.v = (int)v;
+    return e;
+}
+
+
 /**
  *  Store only the elements of v for which v[i] != i.
     Assume we have a list of such elements; each record in the list has
@@ -71,15 +106,21 @@ static inline int64_t random_int64(uint64_t* state, int64_t min, int64_t max)
     • Test 1 fails, Test 2 succeeds: select i; update (k, e′′) to (i, e′′).
     • Both tests succeed: select e′; update (i, e′) to (i, e′′); delete (k, e′′).
 
-    Returns p = density * m distinct arc indices in [0, m), NULL if the
-    arguments are invalid or an allocation fails. Same seed, same arcs.
+    The selected index is decoded into its arc on the spot, the edges come
+    out in a single pass. Returns p = density * m distinct arcs of the
+    space of n vertices (written in *out_p), NULL if the arguments are
+    invalid or an allocation fails. Same state, same arcs; the state is
+    left advanced for the weights.
  */
-static int64_t* generate_random_graph_edges(const float density, const int64_t m,
-                                            const uint64_t seed)
+static GraphEdge* generate_random_graph_edges(const float density, const int n, const bool directed,
+                                              uint64_t* state, int64_t* out_p)
 {
-    if (m <= 0 || density <= 0 || density > 1)
+    // Cast before multiplying: n(n-1) overflows an int from n ~ 46k
+    const int64_t m = directed ? (int64_t)n * (n - 1) : (int64_t)n * (n - 1) / 2;
+
+    if (n < 2 || density <= 0 || density > 1)
     {
-        LOG_ERROR("invalid arguments for random generation, density=%f m=%" PRId64, density, m);
+        LOG_ERROR("invalid arguments for random generation, density=%f n=%d", density, n);
         return NULL;
     }
 
@@ -91,7 +132,7 @@ static int64_t* generate_random_graph_edges(const float density, const int64_t m
         return NULL;
     }
 
-    int64_t* edges = (int64_t*)malloc(sizeof(int64_t) * (size_t)p);
+    GraphEdge* edges = (GraphEdge*)malloc(sizeof(GraphEdge) * (size_t)p);
     // At most p records, twice the slots keeps the load under 50%: there is no grow
     random_entry_t* map = hash_table_create(random_entry_t, 2 * (size_t)p, NULL);
 
@@ -111,12 +152,10 @@ static int64_t* generate_random_graph_edges(const float density, const int64_t m
         return NULL;
     }
 
-    uint64_t state = seed;
-
     for (int64_t k = 0; k < p; k++)
     {
         // Any drawer not sealed yet: 0..k-1 are taken
-        int64_t i = random_int64(&state, k, m - 1);
+        int64_t i = random_int64(state, k, m - 1);
 
         random_entry_t* rec_i = hash_table_get(map, i); // Test 1
         random_entry_t* rec_k = hash_table_get(map, k); // Test 2
@@ -130,33 +169,52 @@ static int64_t* generate_random_graph_edges(const float density, const int64_t m
         /* The four cases collapse in select v[i], v[i] = v[k], seal k:
          * the put appends or updates the record of i, the remove drops the
          * dead record of k (when i == k it is the one just put). */
-        edges[k] = v_i;
+        edges[k] = edge_from_id(v_i, n, directed);
         hash_table_put(map, ((random_entry_t){.key = i, .value = v_k}));
         hash_table_remove(map, k);
     }
 
     hash_table_free(map);
+    *out_p = p;
     return edges;
 }
 
-static void generate_random_weights(GraphEdge* edges)
+/* Integer weights in [1, max_weight]: 0.0 means "no edge" in this
+ * library, it must never come out. */
+static void generate_random_weights(GraphEdge* edges, const int64_t p, const int64_t max_weight,
+                                    uint64_t* state)
 {
-
+    for (int64_t k = 0; k < p; k++)
+    {
+        edges[k].w = (double)random_int64(state, 1, max_weight);
+    }
 }
 
-Graph* generate_random_graph(const float density, const int64_t m, const bool weighted)
+#define GENERATOR_MAX_WEIGHT 100
+
+/* Random graph on n vertices with density * m arcs out of the
+ * m = n(n-1) (directed) or n(n-1)/2 (undirected) possible ones, no self
+ * loops, no duplicates. Unweighted arcs weigh 1.0. Same seed, same graph. */
+static Graph* generate_random_graph(const float density, const int n, const bool weighted,
+                                    const bool directed, const uint64_t seed, const GraphRepr repr)
 {
-    if(m <= 0)
+    uint64_t state = seed;
+    int64_t  p     = 0;
+
+    GraphEdge* edges = generate_random_graph_edges(density, n, directed, &state, &p);
+    if (edges == NULL)
     {
-        LOG_ERROR();
+        return NULL;
     }
 
-    if(density<= 0)
+    if (weighted)
     {
-        LOG_ERROR();
+        generate_random_weights(edges, p, GENERATOR_MAX_WEIGHT, &state);
     }
 
-
+    Graph* g = graph_from_edges(n, directed, edges, (size_t)p, repr);
+    free(edges);
+    return g;
 }
 
 #endif
