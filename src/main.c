@@ -13,8 +13,9 @@
 #define OUTPUT_DOT "out/bayarea.dot"
 #define EXAMPLE_NODE 7
 
-/* Lista degli archi di un grafo non orientato, ognuno una volta sola (u < v),
- * come la vuole graph_mst_kruskal. NULL se l'allocazione fallisce. */
+/* Edge list of the graph, each edge once: every out-arc when directed,
+ * only u < v when undirected (both adjacency lists hold the edge), as
+ * graph_mst_kruskal wants it. NULL if the allocation fails. */
 static GraphEdge* collect_edges(const Graph* g, size_t* count)
 {
     GraphEdge* edges = malloc(sizeof(GraphEdge) * (g->m > 0 ? g->m : 1));
@@ -29,7 +30,7 @@ static GraphEdge* collect_edges(const Graph* g, size_t* count)
         double    w;
         graph_iter_out(g, u, &it);
         while (graph_iter_next(&it, &v, &w))
-            if (u < v)
+            if (g->directed || u < v)
                 edges[(*count)++] = (GraphEdge){u, v, w};
     }
     return edges;
