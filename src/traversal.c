@@ -477,19 +477,20 @@ GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_si
         return NULL;
     }
 
-    quick_sort_iter* sorting;
-    graph_edges_quick_sort_iter_init(sorting, edges, g->m);
+    quick_sort_iter sorting;
+    graph_edges_quick_sort_iter_init(&sorting, edges, g->m);
 
     for (size_t i = 0; *mst_size < g->n - 1 && i < g->m; i++)
     {
-        GraphEdge* min_edge_i = graph_edges_quick_sort_step(sorting);
+        GraphEdge* min_edge_i = graph_edges_quick_sort_step(&sorting);
         // A merge happens only if u and v were in different trees: no cycle
         if (uf_union(union_find, min_edge_i->u, min_edge_i->v))
         {
             MST[(*mst_size)++] = *min_edge_i;
         }
     }
-
+    
+    return MST;
 }
 
 GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
