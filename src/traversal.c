@@ -490,6 +490,8 @@ GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_si
         }
     }
     
+    graph_edges_quick_sort_iter_cleanup(&sorting);
+    uf_free(union_find);
     return MST;
 }
 
