@@ -93,6 +93,7 @@ void graph_edges_partial_quick_sort(GraphEdge* edges, int count, int p, int q, i
     stack_free(stack);
 }
 
+
 bool graph_edges_quick_sort_iter_init(quick_sort_iter* it, GraphEdge* edges, int count)
 {
     if (it == NULL || edges == NULL || count <= 0)

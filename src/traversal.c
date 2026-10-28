@@ -4,6 +4,7 @@
 #include "../include/Sorting.h"
 #include "../include/Stack.h"
 #include "../include/UnionFInd.h"
+#include "../include/DHeap.h"
 #include "internal.h"
 #include "star.h"
 #include <stdio.h>
@@ -452,6 +453,20 @@ void traversal_cleanup(Traversal** t)
         *t = NULL;
         LOG_DEBUG("Traversal freed");
     }
+}
+
+typedef struct
+{
+    int id;
+    double weight;
+}quick_star_node;
+
+
+GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+{
+    quick_star_node* heap = dheap_create(g->n, 4, NULL, quick_star_node);
+
+    dheap_free(heap);
 }
 
 GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)

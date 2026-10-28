@@ -32,10 +32,12 @@ int  graph_edges_partition(GraphEdge* edges, int count, int p, int q);
 void graph_edges_quick_sort(GraphEdge* edges, int count, int p, int q);
 void graph_edges_partial_quick_sort(GraphEdge* edges, int count, int p, int q, int k);
 
+
 /* Lazy sort: init, then each step returns the next edge by weight (NULL when
  * done), cleanup frees the stack. */
 bool       graph_edges_quick_sort_iter_init(quick_sort_iter* it, GraphEdge* edges, int count);
 GraphEdge* graph_edges_quick_sort_step(quick_sort_iter* it);
+
 void       graph_edges_quick_sort_iter_cleanup(quick_sort_iter* it);
 
 #endif /* GRAPH_SORTING_H */
