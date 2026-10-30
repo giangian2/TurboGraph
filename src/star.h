@@ -115,4 +115,20 @@ static inline bool star_iter_next(GraphIter* it, int* v, double* w)
     return true;
 }
 
+/* O(1): the bounds of the block are the degree. */
+static inline int star_out_degree(const Graph* g, int u)
+{
+    const int* head = st_heads((const Star*)g->data);
+    return head[u + 1] - head[u];
+}
+
+static inline int star_in_degree(const Graph* g, int u)
+{
+    if (!g->directed)
+        return star_out_degree(g, u); // no in star: the out star is symmetric
+
+    const int* rhead = st_rheads((const Star*)g->data);
+    return rhead[u + 1] - rhead[u];
+}
+
 #endif /* GRAPH_STAR_H */

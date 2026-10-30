@@ -455,18 +455,158 @@ void traversal_cleanup(Traversal** t)
     }
 }
 
+/*
 typedef struct
 {
     int id;
     double weight;
+    GraphEdge edge;
 }quick_star_node;
+*/
 
-
-GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+typedef struct
 {
-    quick_star_node* heap = dheap_create(g->n, 4, NULL, quick_star_node);
+    GraphEdge           min_weight_edge;
+    GraphEdge*          out_edges;
+    quick_sort_iter     sorting;
+    double              min_weight;
+    int                 id;
+}q_step_iter;
 
+
+static int dheap_q_comparer(const void* a, const void* b)
+{
+    const q_step_iter* qa = a;
+    const q_step_iter* qb = b;
+
+    return (qa->min_weight > qb->min_weight) - (qa->min_weight < qb->min_weight);
+}
+
+static inline void q_step_iter_cleanup(q_step_iter* q_it)
+{
+    graph_edges_quick_sort_iter_cleanup(&q_it->sorting);
+    free(q_it->out_edges);
+}
+
+static inline bool q_step_iter_init(const Graph* g, q_step_iter* q_it, int node, IterOutFn expand, IterNextFn next)
+{
+    int out_degree = star_out_degree(g, node);
+
+    // ISOLATED NODE: NOTHING TO MERGE, IT NEVER ENTERS THE HEAP
+    if (out_degree == 0)
+    {
+        return false;
+    }
+
+    GraphEdge* out_edges = (GraphEdge*)malloc(sizeof(GraphEdge) * out_degree);
+
+    if (out_edges == NULL)
+    {
+        LOG_ERROR("OUT-STAR EDGES ALLOCATION FAILED IN Q-STEP ITERATOR INIT!");
+        return false;
+    }
+
+    GraphIter it;
+    expand(g, node, &it);
+    int    u;
+    double w;
+
+    for (int i = 0; next(&it, &u, &w); i++)
+    {
+        GraphEdge e  = {.u = node, .v = u, .w = w};
+        out_edges[i] = e;
+    }
+
+    if (!graph_edges_quick_sort_iter_init(&q_it->sorting, out_edges, out_degree))
+    {
+        free(out_edges);
+        return false;
+    }
+
+    GraphEdge* first_min_edge = graph_edges_quick_sort_step(&q_it->sorting);
+
+    q_it->min_weight      = first_min_edge->w;
+    q_it->min_weight_edge = *first_min_edge;
+    q_it->out_edges       = out_edges;
+    q_it->id              = node;
+
+    return true;
+}
+
+GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, int* mst_size )
+{
+    if (g == NULL || mst_size == NULL || g->directed)
+    {
+        LOG_ERROR("Kruskal needs an undirected graph and non NULL arguments");
+        return NULL;
+    }
+
+    *mst_size = 0;
+
+    size_t     max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
+    GraphEdge* MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
+    int*       union_find = uf_create(g->n);
+    if (MST == NULL || union_find == NULL)
+    {
+        free(MST);
+        if (union_find != NULL)
+        {
+            uf_free(union_find);
+        }
+        return NULL;
+    }
+
+    //INLINR THE FUNCTIONS, DEFINITIONS KNOW AT COMPILE TIME!
+    IterOutFn expand    = star_iter_out;
+    IterNextFn next     = star_iter_next;
+    q_step_iter* heap   = dheap_create(g->n, 4, dheap_q_comparer, q_step_iter);
+
+    //INIT: FIRST Q-STEP
+    for(size_t i = 0; i < g->n; i++)
+    {
+        q_step_iter q_it;
+        //INITIALIZE THE ITERATOR FOR EACH NODE, IT CREATES THE STAR AND DOI FIRST RAN OF QUICK SORT ON OUT STAR OF EACH NODE
+        if (q_step_iter_init(g, &q_it, i, expand, next))
+        {
+            dheap_insert(heap, q_it, dheap_q_comparer);
+        }
+    }
+
+    // EVERY UNDIRECTED EDGE IS IN BOTH STARS: UP TO 2m EXTRACTIONS, STOP ON THE HEAP
+    while (*mst_size < g->n - 1 && !dheap_empty(heap))
+    {
+        q_step_iter* min_weight_iterator = &heap[0];
+        GraphEdge min_edge_i = min_weight_iterator->min_weight_edge;
+
+        if (uf_union(union_find, min_edge_i.u, min_edge_i.v))
+        {
+            MST[(*mst_size)++] = min_edge_i;
+        }
+
+        GraphEdge* new_candidate_edge = graph_edges_quick_sort_step(&min_weight_iterator->sorting);
+
+        if (new_candidate_edge == NULL)
+        {
+            q_step_iter exhausted;
+            dheap_pop(heap, &exhausted, dheap_q_comparer);
+            q_step_iter_cleanup(&exhausted);
+            continue;
+        }
+
+        min_weight_iterator->min_weight_edge = *new_candidate_edge;
+        min_weight_iterator->min_weight      = new_candidate_edge->w;
+
+        dheap_update(heap, *min_weight_iterator, dheap_q_comparer);
+    }
+
+    //CLEANUP
+    for (size_t k = 0; k < dheap_size(heap); k++)
+    {
+        q_step_iter_cleanup(&heap[k]);
+    }
+    uf_free(union_find);
     dheap_free(heap);
+    return MST;
 }
 
 GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)

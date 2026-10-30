@@ -49,21 +49,7 @@ static double star_get_weight(const Graph* g, int u, int v)
     return 0.0; // no u -> v arc
 }
 
-/* O(1): the bounds of the block are the degree. */
-static int star_out_degree(const Graph* g, int u)
-{
-    const int* head = st_heads((const Star*)g->data);
-    return head[u + 1] - head[u];
-}
 
-static int star_in_degree(const Graph* g, int u)
-{
-    if (!g->directed)
-        return star_out_degree(g, u); // no in star: the out star is symmetric
-
-    const int* rhead = st_rheads((const Star*)g->data);
-    return rhead[u + 1] - rhead[u];
-}
 
 /*
  * Mutation would mean shifting every arc past u's block and bumping
