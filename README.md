@@ -147,8 +147,11 @@ still change.
 - **Connectivity:** connected components for undirected graphs and strongly
   connected components (Kosaraju) for directed ones, returned in a CSR-like
   `Components` block.
-- **Minimum spanning forest:** Kruskal with union-find.
-- **Edge sorting** (`Sorting.h`), all based on Hoare partition:
+- **Minimum spanning forest:** Kruskal with union-find, in three variants:
+  full sort, lazy quicksort, and lazy quicksort per star merged through a
+  heap. See [docs/MST.md](docs/MST.md) for measurements and next steps.
+- **Edge sorting** (`Sorting.h`), a single header generic over any record
+  with a `double w` field, all based on Hoare partition:
   - iterative quicksort on an explicit stack;
   - partial quicksort, which only sorts the first `k` positions;
   - a lazy iterator that returns one edge per step in weight order and only
@@ -185,8 +188,7 @@ over the four sample graphs, in both STAR and LIST).
 - DFS gains little from inlining: its iterators must live in the stack
   frames, in memory. A smaller CSR frame of vertex, cursor and end is
   planned.
-- `graph_mst_prim()` and the quick Kruskal variants are declared but not yet
-  implemented.
+- `graph_mst_prim()` is declared but not yet implemented.
 - `graph_convert()` between representations is not implemented yet.
 
 ## Roadmap
