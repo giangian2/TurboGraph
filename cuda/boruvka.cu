@@ -1,9 +1,8 @@
 /*
  * Boruvka minimum spanning forest on the GPU.
  *
- * Compiled by nvcc through cuda/boruvka_cli.cu (see cuda/build.bat): the
- * C11 engine is built by a 32 bit gcc, which cannot load 64 bit CUDA code,
- * so the benchmark talks to the GPU through that small executable.
+ * Built as a shared library with a plain C ABI (see cuda/README.md), so the
+ * C11 engine can load it at run time without sharing a toolchain with nvcc.
  *
  * Each round, on the edges that still join two different components:
  *   1. every component finds its lightest incident edge (two atomicMin
@@ -40,7 +39,20 @@ typedef struct
     int   rounds;
 } BoruvkaTimes;
 
-int boruvka_gpu(int n, size_t m, const BoruvkaEdge* edges, int* out_idx, BoruvkaTimes* times);
+#ifdef _WIN32
+#define BORUVKA_API __declspec(dllexport)
+#else
+#define BORUVKA_API __attribute__((visibility("default")))
+#endif
+
+/*
+ * Minimum spanning forest of the undirected graph with n vertices and the m
+ * edges `edges`. out_idx (room for n ints) receives the indices of the edges
+ * in the forest. Returns their number, or -1 on error (bad arguments, CUDA
+ * failure). times is optional. Device memory is allocated and freed per call.
+ */
+BORUVKA_API int boruvka_gpu(int n, size_t m, const BoruvkaEdge* edges, int* out_idx,
+                            BoruvkaTimes* times);
 }
 
 #define CK(call)                                                                               \
