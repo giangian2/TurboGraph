@@ -4,8 +4,10 @@
  *   bench_mst [n] [avg_degree] [runs]       random graph, continuous weights
  *   bench_mst file.dot [runs]               imported (undirected) graph
  *
- * Run it from the project root. The CPU variants sort their edge list in
- * place, so it is restored outside the timer. The GPU library is loaded at
+ * Run it from the project root. The CPU variants reorder their edge list in
+ * place, so it is restored outside the timer. The variants that take an
+ * EdgeList get the working copy as it is, the others as a StarEdgeList (the
+ * list comes grouped by source from graph_star_edge_list). The GPU library is loaded at
  * run time (build/boruvka_cuda.dll or build/libboruvka_cuda.so, see
  * cuda/README.md): without it the CPU numbers are still printed. The GPU time
  * is split into transfer and compute: the edge list is uploaded as it is, 16
@@ -63,27 +65,6 @@ static boruvka_fn load_gpu(void)
 #endif
 }
 
-/* Every undirected edge once (u < v), grouped by source: the order the
- * Kruskal variants expect */
-static GraphEdge* collect_edges(const Graph* g, size_t* count)
-{
-    GraphEdge* edges = malloc(sizeof(GraphEdge) * (g->m > 0 ? g->m : 1));
-    if (!edges)
-        return NULL;
-    *count = 0;
-    for (int u = 0; u < g->n; u++)
-    {
-        GraphIter it;
-        int       v;
-        double    w;
-        graph_iter_out(g, u, &it);
-        while (graph_iter_next(&it, &v, &w))
-            if (g->directed || u < v)
-                edges[(*count)++] = (GraphEdge){u, v, w};
-    }
-    return edges;
-}
-
 static double weight_of(const GraphEdge* e, int k)
 {
     double s = 0;
@@ -127,6 +108,10 @@ static Graph* random_graph(int n, double avg_deg)
     return g;
 }
 
+/* The working copy as each kind of list. Parenthesized: they go inside macro arguments */
+#define RAW_LIST ((EdgeList){work, m})
+#define STAR_LIST ((StarEdgeList){work, m})
+
 /* Best of `runs` of `body`, restoring the edge list outside the timer. The
  * last run's MST is left in `mst`, the earlier ones are freed. */
 #define BEST_OF(runs, body, out)            \
@@ -168,9 +153,10 @@ int main(int argc, char** argv)
     if (runs < 1)
         runs = 1;
 
-    size_t     m;
-    GraphEdge* edges = collect_edges(g, &m);
-    size_t     bytes = sizeof(GraphEdge) * (m ? m : 1);
+    StarEdgeList star  = graph_star_edge_list(g);
+    GraphEdge*   edges = star.edges;
+    size_t       m     = star.count;
+    size_t       bytes = sizeof(GraphEdge) * (m ? m : 1);
     GraphEdge* work  = malloc(bytes);
     int*       idx   = malloc(sizeof(int) * (size_t)g->n);
     if (!edges || !work || !idx)
@@ -178,30 +164,25 @@ int main(int argc, char** argv)
     printf("n = %d, m = %zu (avg degree %.1f)\n", g->n, m, 2.0 * (double)m / g->n);
 
     int        size = 0;
-    double     t_kruskal, t_quick, t_star, t_filter, t_filter_star;
+    double     t_kruskal, t_quick, t_star, t_filter_star;
     GraphEdge* mst;
 
-    BEST_OF(runs, mst = graph_mst_kruskal(g, work, &size), t_kruskal);
+    BEST_OF(runs, mst = graph_mst_kruskal(g, RAW_LIST, &size), t_kruskal);
     int    ref_size   = size;
     double ref_weight = weight_of(mst, size);
     free(mst);
 
-    BEST_OF(runs, mst = graph_mst_quick_kruskal(g, work, &size), t_quick);
+    BEST_OF(runs, mst = graph_mst_quick_kruskal(g, RAW_LIST, &size), t_quick);
     printf("quick kruskal      : %9.2f ms  %s\n", t_quick,
            verdict(size, weight_of(mst, size), ref_size, ref_weight));
     free(mst);
 
-    BEST_OF(runs, mst = graph_mst_quick_star_kruskal(g, work, &size), t_star);
+    BEST_OF(runs, mst = graph_mst_quick_star_kruskal(g, STAR_LIST, &size), t_star);
     printf("quick star kruskal : %9.2f ms  %s\n", t_star,
            verdict(size, weight_of(mst, size), ref_size, ref_weight));
     free(mst);
 
-    BEST_OF(runs, mst = graph_mst_filter_kruskal(g, work, &size), t_filter);
-    printf("filter kruskal     : %9.2f ms  %s\n", t_filter,
-           verdict(size, weight_of(mst, size), ref_size, ref_weight));
-    free(mst);
-
-    BEST_OF(runs, mst = graph_mst_filter_star_kruskal(g, work, &size), t_filter_star);
+    BEST_OF(runs, mst = graph_mst_filter_star_kruskal(g, STAR_LIST, &size), t_filter_star);
     printf("filter star kruskal: %9.2f ms  %s\n", t_filter_star,
            verdict(size, weight_of(mst, size), ref_size, ref_weight));
     free(mst);

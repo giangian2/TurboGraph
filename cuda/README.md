@@ -10,8 +10,8 @@ benchmark that compares it with the Kruskal variants of `src/traversal.c`.
 | `bench_mst.c` | benchmark, plain C: builds the graph, runs the CPU variants, loads the GPU library at run time and checks that every result has the same forest size and weight |
 | `build.sh` / `build.bat` | Linux / Windows build of the library and the benchmark |
 
-The GPU side takes the same edge array the CPU variants take (`GraphEdge`:
-`int u, v; double w`) and returns the indices of the forest edges. It knows
+The GPU side takes an array of edges in any order (`GraphEdge`: `int u, v;
+double w`, what the `EdgeList` of the CPU variants holds) and returns the indices of the forest edges. It knows
 nothing about `Graph` or the CSR: the library is loaded with `dlopen` /
 `LoadLibrary`, so the engine and nvcc never have to share a toolchain.
 
@@ -32,6 +32,9 @@ gcc on the PATH, e.g. WinLibs; a 32 bit MinGW cannot load a 64 bit DLL):
     bin\bench_mst 1000000 16 3
 
 If the library is missing, the benchmark still prints the CPU numbers.
+
+On Windows run `cudauild.bat` from `cmd` or PowerShell: Git Bash mangles
+the path.
 
 ## How the algorithm works
 
