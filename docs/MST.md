@@ -1,22 +1,24 @@
 # Minimum spanning forest: Kruskal variants
 
-Five Kruskal variants live in `src/traversal.c`. All of them take the same
-input: `edges`, the `g->m` edges of an undirected graph, each once (as
-`collect_edges()` in `src/main.c` builds them), and sort it in place.
+Four Kruskal variants live in `src/traversal.c`. They take the edges of an
+undirected graph, each once, as one of two types (`include/Graph.h`):
 
-| Function | Sorting |
-|---|---|
-| `graph_mst_kruskal` | full quicksort, then one pass |
-| `graph_mst_quick_kruskal` | lazy quicksort: one edge per step, sorted only as far as the forest reads |
-| `graph_mst_quick_star_kruskal` | one lazy quicksort per star, merged through a d-ary heap; each range is filtered before it is partitioned |
-| `graph_mst_filter_kruskal` | Filter-Kruskal in rounds: threshold, one filtering pass, lazy quicksort of the light edges only |
-| `graph_mst_filter_star_kruskal` | the same, with `find(u)` computed once per run of equal `u` |
+- `EdgeList`: the edges in any order;
+- `StarEdgeList`: the same edges **grouped by source**. The edges of a star
+  are contiguous and a run of equal `u` is the star of `u`. It is what
+  `graph_star_edge_list()` builds, walking the out stars in order and keeping
+  `u < v`. A `StarEdgeList` converts to an `EdgeList` with
+  `star_as_edge_list()`, not the other way: the signature of an algorithm
+  says which one it needs and the compiler rejects the wrong one.
 
-The quick star variant wants `edges` **grouped by source**: the edges of a
-star are contiguous, which is what walking the out stars in order and
-keeping `u < v` produces. Each run of equal `u` is a star and is sorted
-inside its own slice. Each undirected edge is copied, sorted and extracted
-once.
+The list is reordered in place, so pass a copy to keep it.
+
+| Function | Input | Sorting |
+|---|---|---|
+| `graph_mst_kruskal` | `EdgeList` | full quicksort, then one pass |
+| `graph_mst_quick_kruskal` | `EdgeList` | lazy quicksort: one edge per step, sorted only as far as the forest reads |
+| `graph_mst_quick_star_kruskal` | `StarEdgeList` | one lazy quicksort per star inside its own slice, merged through a d-ary heap; the range about to be partitioned is filtered first |
+| `graph_mst_filter_star_kruskal` | `StarEdgeList` | Filter-Kruskal in rounds: threshold, one filtering pass, lazy quicksort of the light edges only |
 
 All of them sort through `Sorting.h`, a single-header Hoare quicksort over
 any record with a `double w` field. `sizeof(T)` and the offset of `w` reach
@@ -88,33 +90,35 @@ each step to see what each one is worth.
 
 ## Filter-Kruskal in rounds
 
-`graph_mst_filter_kruskal` is Filter-Kruskal (Osipov, Sanders, Singler) as
-an iterative loop. Each round makes **one pass** over the edges still alive:
+`graph_mst_filter_star_kruskal` is Filter-Kruskal (Osipov, Sanders, Singler)
+as an iterative loop over a `StarEdgeList`. Each round makes **one pass**
+over the edges still alive (`filter_pass`):
 
 - an edge with `find(u) == find(v)` is dropped: it can never join the forest;
 - one with `w <= tau` is copied to a light buffer;
 - the others are compacted in place into `edges[]`, keeping their order.
 
 The light buffer is then sorted lazily and read by the usual Kruskal loop.
-`tau` is a quantile of a sample of 1024 weights that leaves about `target`
-edges light; `target` starts at `2n` and doubles every round, so the early
-rounds settle the forest on few edges and the filter removes most of what is
-heavy before it is ever sorted. Every light edge weighs `<= tau <` every
-heavy one, so the edges are consumed in Kruskal order.
+`tau` (`filter_threshold`) is a quantile of a sample of 1024 weights that
+leaves about `target` edges light; `target` starts at `2n` and doubles every
+round, so the early rounds settle the forest on few edges and the filter
+removes most of what is heavy before it is ever sorted. Every light edge
+weighs `<= tau <` every edge kept, so the edges are consumed in Kruskal order.
 
-`graph_mst_filter_star_kruskal` is the same function with `by_star`: when
-the edges are grouped by source, `find(u)` is computed once per run of equal
-`u`, so the pass costs one `find` per edge instead of two. Nothing else
-depends on the grouping and the result is the same on any order. The
-compaction keeps the order, so the grouping survives every round. This is
-the only thing the star adds here: no per-star state exists.
+The star order buys one thing: all the edges of a star share `u`, so
+`find(u)` is computed once per star and the pass costs one `find(v)` per edge
+instead of two (3 - 15% in the measurements). The compaction keeps the
+order, so the grouping survives every round; no per-star state exists.
 
-In `graph_mst_quick_star_kruskal` the same filter runs per star: before a
-range is partitioned, the edges whose far end is already in the tree of `u`
-are dropped. It helps (2 - 2.5x on large graphs) but the heap stays the
-bottleneck: on 1M vertices `dheap_update` takes about 54% of the cycles,
-~1200 cycles a call, since the heap holds 937k elements of 48 bytes. The
-arity does not help (d = 4 and 8 are the best; 2, 16, 32 are 5 - 25% worse).
+In `graph_mst_quick_star_kruskal` the same idea runs per star
+(`star_filter_top`): before the next step, the range on top of the star's
+frame stack, the leftmost one still to be partitioned, drops the edges whose
+far end is already in the tree of `u`. Frames below are filtered when their
+turn comes, when more trees have merged. It helps (2 - 2.5x on large graphs)
+but the heap stays the bottleneck: on 1M vertices `dheap_update` takes about
+54% of the cycles, ~1200 cycles a call, since the heap holds 937k elements of
+48 bytes. The arity does not help (d = 4 and 8 are the best; 2, 16, 32 are
+5 - 25% worse).
 
 ## Boruvka on the GPU
 
