@@ -46,6 +46,37 @@ typedef struct
 } GraphEdge;
 
 /*
+ * Edge lists the MST algorithms take. Two distinct types, so that the
+ * signature says what an algorithm needs and the compiler rejects the wrong
+ * one. Both hold the edges of an undirected graph, each once, and the
+ * algorithms reorder or compact edges[] in place: pass a copy to keep yours.
+ *
+ *   EdgeList      the edges in ANY order.
+ *   StarEdgeList  the same edges GROUPED BY SOURCE: edges with the same u are
+ *                 contiguous, and a run of equal u is the star of u. Build it
+ *                 with graph_star_edge_list(); an algorithm that takes it
+ *                 relies on the grouping and does not check it.
+ *
+ * A StarEdgeList is a valid EdgeList (star_as_edge_list), not the other way.
+ */
+typedef struct
+{
+    GraphEdge* edges;
+    size_t     count;
+} EdgeList;
+
+typedef struct
+{
+    GraphEdge* edges;
+    size_t     count;
+} StarEdgeList;
+
+static inline EdgeList star_as_edge_list(StarEdgeList list)
+{
+    return (EdgeList){list.edges, list.count};
+}
+
+/*
  * Neighbor iterator. One struct for every representation; each uses the
  * cursor fields it needs. Obtain with graph_iter_out()/graph_iter_in(),
  * advance with graph_iter_next(). Do not mutate the graph while iterating.
@@ -134,6 +165,11 @@ Graph* graph_create(int n, bool directed, GraphRepr repr);
  * directly). Edges must be valid (vertices in range, weight != 0);
  * for STAR the array must not contain duplicate edges. */
 Graph* graph_from_edges(int n, bool directed, const GraphEdge* edges, size_t m, GraphRepr repr);
+
+/* The edges of g, each once, grouped by source: every out-arc when g is
+ * directed, only u < v when undirected. A malloc'd block (to free() through
+ * .edges); .edges is NULL if the allocation fails. */
+StarEdgeList graph_star_edge_list(const Graph* g);
 
 void graph_free(Graph* g);
 

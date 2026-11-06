@@ -75,16 +75,21 @@ void        traversal_cleanup(Traversal** t);
 
 /* ---- algorithms ------------------------------------------------- */
 /*
- * Kruskal on an undirected graph. edges holds the g->m edges of g, each
- * once, and gets sorted by weight in place. Returns a malloc'd array of the
- * spanning forest edges (to free()), *mst_size receives its length: n - 1
- * if g is connected, n - #components otherwise. NULL on error or directed g.
+ * Minimum spanning forest of an undirected graph g by Kruskal. The edge list
+ * holds the edges of g, each once (see EdgeList / StarEdgeList in Graph.h),
+ * and is reordered in place. Returns a malloc'd array of the forest edges
+ * (to free()), *mst_size receives its length: n - 1 if g is connected,
+ * n - #components otherwise. NULL on error or directed g.
+ *
+ * The variants differ in how much they sort. Those that exploit the edges
+ * being grouped by source take a StarEdgeList, the others any EdgeList.
  */
-GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
-GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
-GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
-GraphEdge* graph_mst_filter_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
-GraphEdge* graph_mst_filter_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
+GraphEdge* graph_mst_kruskal(const Graph* g, EdgeList edges, int* mst_size);
+GraphEdge* graph_mst_quick_kruskal(const Graph* g, EdgeList edges, int* mst_size);
+
+GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, StarEdgeList edges, int* mst_size);
+GraphEdge* graph_mst_filter_star_kruskal(const Graph* g, StarEdgeList edges, int* mst_size);
+
 GraphEdge* graph_mst_prim(const Graph* g, GraphEdge* edges, int* mst_size);
 
 #endif /* TRAVERSAL_H */
