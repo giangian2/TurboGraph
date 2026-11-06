@@ -476,6 +476,45 @@ static int dheap_q_comparer(const void* a, const void* b)
 
 /*
  * Kruskal fed by lazily sorted stars merged through a heap: the heap top
+/* QUICK_SORT_STEP for a star: before a range is partitioned, the edges whose
+ * far end already sits in the tree of u are dropped (they can never join the
+ * forest). All edges of a star share u, so find(u) is computed once per
+ * range and the filter costs one find(v) per edge. The range is compacted in
+ * place and the frame shrinks with it: ranges are popped left to right and
+ * only the popped one is touched, so edges already returned stay valid. */
+static GraphEdge* star_filter_step(quick_sort_iter* it, int* union_find)
+{
+    GraphEdge* star = (GraphEdge*)it->edges;
+
+    while (it->top > 0)
+    {
+        quick_sort_frame frame = it->frames[--it->top];
+
+        if (frame.p < frame.q)
+        {
+            int root = uf_find(union_find, star[frame.p].u);
+            int k    = frame.p;
+            for (int i = frame.p; i <= frame.q; i++)
+                if (uf_find(union_find, star[i].v) != root)
+                    star[k++] = star[i];
+            if (k == frame.p)
+                continue;
+            frame.q = k - 1;
+        }
+
+        if (frame.p == frame.q)
+            return star + frame.p;
+
+        int pivot_position = QUICK_PARTITION(star, it->count, frame.p, frame.q);
+        if (pivot_position < 0)
+            return NULL;
+
+        it->frames[it->top++] = (quick_sort_frame){.p = pivot_position + 1, .q = frame.q};
+        it->frames[it->top++] = (quick_sort_frame){.p = frame.p, .q = pivot_position};
+    }
+    return NULL;
+}
+
  * is the lightest edge not yet extracted, and every star is sorted only as
  * far as the MST actually reads it.
  *
@@ -544,7 +583,7 @@ GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* m
         if (uf_union(union_find, top->cur->u, top->cur->v))
             MST[(*mst_size)++] = *top->cur;
 
-        GraphEdge* next_edge = QUICK_SORT_STEP(&top->sorting, edges);
+        GraphEdge* next_edge = star_filter_step(&top->sorting, union_find);
 
         if (next_edge == NULL)
         {
