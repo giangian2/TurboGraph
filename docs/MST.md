@@ -1,6 +1,6 @@
 # Minimum spanning forest: Kruskal variants
 
-Three Kruskal variants live in `src/traversal.c`. All of them take the same
+Five Kruskal variants live in `src/traversal.c`. All of them take the same
 input: `edges`, the `g->m` edges of an undirected graph, each once (as
 `collect_edges()` in `src/main.c` builds them), and sort it in place.
 
@@ -8,7 +8,9 @@ input: `edges`, the `g->m` edges of an undirected graph, each once (as
 |---|---|
 | `graph_mst_kruskal` | full quicksort, then one pass |
 | `graph_mst_quick_kruskal` | lazy quicksort: one edge per step, sorted only as far as the forest reads |
-| `graph_mst_quick_star_kruskal` | one lazy quicksort per star, merged through a d-ary heap |
+| `graph_mst_quick_star_kruskal` | one lazy quicksort per star, merged through a d-ary heap; each range is filtered before it is partitioned |
+| `graph_mst_filter_kruskal` | Filter-Kruskal in rounds: threshold, one filtering pass, lazy quicksort of the light edges only |
+| `graph_mst_filter_star_kruskal` | the same, with `find(u)` computed once per run of equal `u` |
 
 The quick star variant wants `edges` **grouped by source**: the edges of a
 star are contiguous, which is what walking the out stars in order and
@@ -84,37 +86,68 @@ Planned order: 2 and 3 (mechanical, low risk), then 1 (changes the nature of
 the algorithm, measure it carefully), then 4. Rerun the same benchmark after
 each step to see what each one is worth.
 
-## Boruvka on the GPU (branch `cuda-boruvka`)
+## Filter-Kruskal in rounds
 
-`cuda/boruvka.cu` is a CUDA Boruvka (per-component lightest edge by two
-`atomicMin` passes, hooking, pointer jumping, compaction of the internal
-edges). `cuda/bench_mst.c` compares it with the Kruskal variants on the same
-edge list and checks that the forest has the same size and weight.
+`graph_mst_filter_kruskal` is Filter-Kruskal (Osipov, Sanders, Singler) as
+an iterative loop. Each round makes **one pass** over the edges still alive:
 
-Build and run (Windows, nvcc 11.4 needs MSVC 2019; the 32 bit MinGW gcc
-cannot load 64 bit CUDA code, so the GPU side is the executable
-`build/boruvka_cli.exe`, fed through a file):
+- an edge with `find(u) == find(v)` is dropped: it can never join the forest;
+- one with `w <= tau` is copied to a light buffer;
+- the others are compacted in place into `edges[]`, keeping their order.
 
-    cuda\build.bat
-    gcc -std=gnu11 -O2 -Iinclude cuda/bench_mst.c src/{graph,list,star_impl,matrix_impl,queue,stack,importer,traversal,export}.c -lm -o bin/bench_mst
-    bin/bench_mst 1000000 16 3        # n, average degree, runs
-    bin/bench_mst res/BayAreaUs_undirected.dot
+The light buffer is then sorted lazily and read by the usual Kruskal loop.
+`tau` is a quantile of a sample of 1024 weights that leaves about `target`
+edges light; `target` starts at `2n` and doubles every round, so the early
+rounds settle the forest on few edges and the filter removes most of what is
+heavy before it is ever sorted. Every light edge weighs `<= tau <` every
+heavy one, so the edges are consumed in Kruskal order.
 
-Measured on a GTX 750 (sm_50) against quick Kruskal, continuous weights,
-best of 3. "GPU" = upload + compute + download of the forest.
+`graph_mst_filter_star_kruskal` is the same function with `by_star`: when
+the edges are grouped by source, `find(u)` is computed once per run of equal
+`u`, so the pass costs one `find` per edge instead of two. Nothing else
+depends on the grouping and the result is the same on any order. The
+compaction keeps the order, so the grouping survives every round. This is
+the only thing the star adds here: no per-star state exists.
 
-| graph | quick Kruskal | GPU | speedup |
-|---|---|---|---|
-| n = 10k, deg 4 | 2.7 ms | 2.3 ms | 1.2x |
-| n = 100k, deg 4 | 33 ms | 6.7 ms | 5.0x |
-| n = 100k, deg 32 | 123 ms | 38 ms | 3.2x |
-| n = 300k, deg 20 | 409 ms | 83 ms | 4.9x |
-| n = 1M, deg 4 | 498 ms | 77 ms | 6.5x |
-| n = 1M, deg 16 | 1625 ms | 278 ms | 5.8x |
-| n = 2k, deg 500 | 6.7 ms | 10.3 ms | 0.65x |
-| n = 4k, deg 1000 | 23.6 ms | 39.9 ms | 0.59x |
-| BayAreaUs (road, deg 2.5) | 63 ms | 10.5 ms | 6.0x |
+In `graph_mst_quick_star_kruskal` the same filter runs per star: before a
+range is partitioned, the edges whose far end is already in the tree of `u`
+are dropped. It helps (2 - 2.5x on large graphs) but the heap stays the
+bottleneck: on 1M vertices `dheap_update` takes about 54% of the cycles,
+~1200 cycles a call, since the heap holds 937k elements of 48 bytes. The
+arity does not help (d = 4 and 8 are the best; 2, 16, 32 are 5 - 25% worse).
 
-The GPU wins by 5-7x as soon as the graph has ~100k vertices, and loses on
-small dense graphs: quick Kruskal finishes after ~n ln n extractions
-whatever m is, while Boruvka reads all m edges in the first rounds.
+## Boruvka on the GPU
+
+`cuda/` (see `cuda/README.md`) holds a CUDA Boruvka and the benchmark
+`cuda/bench_mst.c`, which runs every variant on the same edge list and
+checks that forest size and weight agree. Per-round steps: two `atomicMin`
+passes for the lightest edge of every component, hooking, pointer jumping,
+relabeling and compaction of the edges.
+
+Measured on a GTX 750 (sm_50), gcc 64 bit `-O2`, continuous weights, best of
+5. GPU = upload + compute + download of the forest. Times in ms.
+
+| graph | quick Kruskal | filter star | GPU | GPU vs quick | GPU vs filter star |
+|---|---|---|---|---|---|
+| n = 2k, deg 500 | 4.9 | 3.6 | 9.5 | 0.5x | 0.4x |
+| n = 4k, deg 1000 | 17.2 | 13.1 | 37.2 | 0.5x | 0.4x |
+| n = 4k, complete | 77 | 46 | 141 | 0.55x | 0.3x |
+| n = 10k, deg 100 | 7.3 | 5.7 | 9.8 | 0.7x | 0.6x |
+| n = 100k, deg 4 | 24.7 | 26.2 | 6.4 | 3.8x | 4.1x |
+| n = 100k, deg 32 | 88 | 40.7 | 37.7 | 2.3x | 1.1x |
+| n = 300k, deg 20 | 291 | 117 | 82 | 3.5x | 1.4x |
+| n = 1M, deg 4 | 333 | 351 | 78 | 4.3x | 4.5x |
+| n = 1M, deg 16 | 1152 | 451 | 276 | 4.2x | 1.6x |
+| BayAreaUs (road, deg 2.5) | 42.5 | 47.0 | 10.5 | 4.1x | 4.5x |
+| twitch (n = 1.9k) | 0.74 | 0.92 | 1.13 | 0.7x | 0.8x |
+
+- On sparse graphs from ~100k vertices the GPU wins 4 - 4.5x against every
+  CPU variant: quick Kruskal is the best of them there and Filter-Kruskal
+  has little to filter.
+- On dense or mid-degree graphs the filter closes most of the gap: the GPU
+  is 1.1 - 1.6x faster than filter star, and on small dense graphs the CPU
+  wins (the GPU reads all `m` edges in the first rounds).
+- The wall clock of a GPU call is 5 - 45 ms above the figure in the table:
+  device allocation is not inside the CUDA events.
+- Numbers taken with a 32 bit gcc overstate the GPU: the CPU code was 30 -
+  40% slower there.
