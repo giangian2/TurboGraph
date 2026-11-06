@@ -83,6 +83,8 @@ void        traversal_cleanup(Traversal** t);
 GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
 GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
 GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
+GraphEdge* graph_mst_filter_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
+GraphEdge* graph_mst_filter_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size);
 GraphEdge* graph_mst_prim(const Graph* g, GraphEdge* edges, int* mst_size);
 
 #endif /* TRAVERSAL_H */

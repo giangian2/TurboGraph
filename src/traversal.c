@@ -7,6 +7,8 @@
 #include "../include/DHeap.h"
 #include "internal.h"
 #include "star.h"
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 
 
@@ -474,8 +476,6 @@ static int dheap_q_comparer(const void* a, const void* b)
     return (qa->min_weight > qb->min_weight) - (qa->min_weight < qb->min_weight);
 }
 
-/*
- * Kruskal fed by lazily sorted stars merged through a heap: the heap top
 /* QUICK_SORT_STEP for a star: before a range is partitioned, the edges whose
  * far end already sits in the tree of u are dropped (they can never join the
  * forest). All edges of a star share u, so find(u) is computed once per
@@ -515,6 +515,8 @@ static GraphEdge* star_filter_step(quick_sort_iter* it, int* union_find)
     return NULL;
 }
 
+/*
+ * Kruskal fed by lazily sorted stars merged through a heap: the heap top
  * is the lightest edge not yet extracted, and every star is sorted only as
  * far as the MST actually reads it.
  *
@@ -606,6 +608,121 @@ cleanup:
         uf_free(union_find);
     free(frames);
     return MST;
+}
+
+static int double_cmp(const void* a, const void* b)
+{
+    double x = *(const double*)a, y = *(const double*)b;
+    return (x > y) - (x < y);
+}
+
+/*
+ * Filter-Kruskal in rounds. Each round makes one pass over the edges still
+ * alive: an edge whose ends already share a tree is dropped (it can never
+ * join the forest), one with w <= tau goes to a light buffer, the others stay
+ * in edges[], compacted in place. The light buffer is then sorted lazily and
+ * read by the usual Kruskal loop; the next round filters the heavy part
+ * before touching it. tau is a sample quantile that leaves about `target`
+ * edges light, and target doubles every round: the sparse early rounds
+ * settle the forest on few edges, and the filter removes most of what is
+ * heavy. Every light edge weighs <= tau < every heavy one, so the order is
+ * the Kruskal order.
+ *
+ * by_star: edges grouped by source (the star order). find(u) is then
+ * computed once per run of equal u, one find(v) per edge instead of two.
+ * Nothing else depends on the grouping.
+ */
+static GraphEdge* filter_kruskal(const Graph* g, GraphEdge* edges, int* mst_size, bool by_star)
+{
+    if (g == NULL || edges == NULL || mst_size == NULL || g->directed)
+    {
+        LOG_ERROR("Kruskal needs an undirected graph and non NULL arguments");
+        return NULL;
+    }
+
+    *mst_size = 0;
+
+    size_t            max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
+    size_t            cap        = g->m > 0 ? g->m : 1;
+    GraphEdge*        MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
+    GraphEdge*        light      = (GraphEdge*)malloc(sizeof(GraphEdge) * cap);
+    quick_sort_frame* frames     = (quick_sort_frame*)malloc(sizeof(quick_sort_frame) * cap);
+    int*              union_find = uf_create(g->n);
+    if (MST == NULL || light == NULL || frames == NULL || union_find == NULL)
+    {
+        LOG_ERROR("filter Kruskal allocation failed (n=%d, m=%zu)", g->n, g->m);
+        free(MST);
+        MST = NULL;
+        goto cleanup;
+    }
+
+    enum { SAMPLE = 1024 };
+    double   sample[SAMPLE];
+    uint64_t rng    = 88172645463325252ULL;
+    size_t   alive  = g->m;
+    size_t   target = 2 * (size_t)g->n;
+
+    while (*mst_size < g->n - 1 && alive > 0)
+    {
+        double tau = HUGE_VAL;
+        if (target < alive)
+        {
+            size_t s = alive < SAMPLE ? alive : SAMPLE;
+            for (size_t i = 0; i < s; i++)
+            {
+                rng ^= rng << 13, rng ^= rng >> 7, rng ^= rng << 17;
+                sample[i] = edges[rng % alive].w;
+            }
+            qsort(sample, s, sizeof(double), double_cmp);
+            tau = sample[(size_t)((double)target / (double)alive * (double)s)];
+        }
+
+        size_t kept = 0, nl = 0;
+        int    last_u = -1, root_u = -1;
+        for (size_t i = 0; i < alive; i++)
+        {
+            GraphEdge e = edges[i];
+            if (!by_star || e.u != last_u)
+            {
+                last_u = e.u;
+                root_u = uf_find(union_find, e.u);
+            }
+            if (uf_find(union_find, e.v) == root_u)
+                continue;
+            if (e.w <= tau)
+                light[nl++] = e;
+            else
+                edges[kept++] = e;
+        }
+        alive = kept;
+
+        quick_sort_iter sorting;
+        if (nl > 0 && QUICK_SORT_ITER_INIT(&sorting, light, (int)nl, frames))
+        {
+            GraphEdge* min_edge;
+            while (*mst_size < g->n - 1 && (min_edge = QUICK_SORT_STEP(&sorting, light)) != NULL)
+                if (uf_union(union_find, min_edge->u, min_edge->v))
+                    MST[(*mst_size)++] = *min_edge;
+        }
+        target *= 2;
+    }
+
+cleanup:
+    if (union_find != NULL)
+        uf_free(union_find);
+    free(frames);
+    free(light);
+    return MST;
+}
+
+GraphEdge* graph_mst_filter_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+{
+    return filter_kruskal(g, edges, mst_size, false);
+}
+
+GraphEdge* graph_mst_filter_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+{
+    return filter_kruskal(g, edges, mst_size, true);
 }
 
 GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
