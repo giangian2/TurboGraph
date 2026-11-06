@@ -83,3 +83,38 @@ heap only adds to it: as m grows the ratio tends to 1 from above.
 Planned order: 2 and 3 (mechanical, low risk), then 1 (changes the nature of
 the algorithm, measure it carefully), then 4. Rerun the same benchmark after
 each step to see what each one is worth.
+
+## Boruvka on the GPU (branch `cuda-boruvka`)
+
+`cuda/boruvka.cu` is a CUDA Boruvka (per-component lightest edge by two
+`atomicMin` passes, hooking, pointer jumping, compaction of the internal
+edges). `cuda/bench_mst.c` compares it with the Kruskal variants on the same
+edge list and checks that the forest has the same size and weight.
+
+Build and run (Windows, nvcc 11.4 needs MSVC 2019; the 32 bit MinGW gcc
+cannot load 64 bit CUDA code, so the GPU side is the executable
+`build/boruvka_cli.exe`, fed through a file):
+
+    cuda\build.bat
+    gcc -std=gnu11 -O2 -Iinclude cuda/bench_mst.c src/{graph,list,star_impl,matrix_impl,queue,stack,importer,traversal,export}.c -lm -o bin/bench_mst
+    bin/bench_mst 1000000 16 3        # n, average degree, runs
+    bin/bench_mst res/BayAreaUs_undirected.dot
+
+Measured on a GTX 750 (sm_50) against quick Kruskal, continuous weights,
+best of 3. "GPU" = upload + compute + download of the forest.
+
+| graph | quick Kruskal | GPU | speedup |
+|---|---|---|---|
+| n = 10k, deg 4 | 2.7 ms | 2.3 ms | 1.2x |
+| n = 100k, deg 4 | 33 ms | 6.7 ms | 5.0x |
+| n = 100k, deg 32 | 123 ms | 38 ms | 3.2x |
+| n = 300k, deg 20 | 409 ms | 83 ms | 4.9x |
+| n = 1M, deg 4 | 498 ms | 77 ms | 6.5x |
+| n = 1M, deg 16 | 1625 ms | 278 ms | 5.8x |
+| n = 2k, deg 500 | 6.7 ms | 10.3 ms | 0.65x |
+| n = 4k, deg 1000 | 23.6 ms | 39.9 ms | 0.59x |
+| BayAreaUs (road, deg 2.5) | 63 ms | 10.5 ms | 6.0x |
+
+The GPU wins by 5-7x as soon as the graph has ~100k vertices, and loses on
+small dense graphs: quick Kruskal finishes after ~n ln n extractions
+whatever m is, while Boruvka reads all m edges in the first rounds.
