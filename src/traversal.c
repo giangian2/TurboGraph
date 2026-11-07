@@ -7,6 +7,8 @@
 #include "../include/DHeap.h"
 #include "internal.h"
 #include "star.h"
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 
 
@@ -474,20 +476,55 @@ static int dheap_q_comparer(const void* a, const void* b)
     return (qa->min_weight > qb->min_weight) - (qa->min_weight < qb->min_weight);
 }
 
+/* Drops, from the range the next QUICK_SORT_STEP will partition, the edges
+ * whose far end already sits in the tree of u: they can never join the
+ * forest, so they are not worth partitioning. The range is the top frame of
+ * the iterator, the leftmost one still to be treated; all its edges share u,
+ * so find(u) is computed once and the filter costs one find(v) per edge. The
+ * survivors are compacted at the start of the range and the frame shrinks
+ * with it (a frame left empty is popped). Only that frame is touched, so the
+ * edges already returned stay valid. Frames below it are filtered when their
+ * turn comes: by then more trees have merged and more edges are dropped. */
+static void star_filter_top(quick_sort_iter* it, int* union_find)
+{
+    GraphEdge* star = (GraphEdge*)it->edges;
+
+    while (it->top > 0)
+    {
+        quick_sort_frame* frame = &it->frames[it->top - 1];
+        if (frame->p == frame->q) // one edge: it is the next minimum, the caller's union rejects it if internal
+            return;
+
+        int root = uf_find(union_find, star[frame->p].u);
+        int kept = frame->p;
+        for (int i = frame->p; i <= frame->q; i++)
+            if (uf_find(union_find, star[i].v) != root)
+                star[kept++] = star[i];
+
+        if (kept > frame->p)
+        {
+            frame->q = kept - 1;
+            return;
+        }
+        it->top--; // every edge was internal: nothing left in this range
+    }
+}
+
 /*
  * Kruskal fed by lazily sorted stars merged through a heap: the heap top
  * is the lightest edge not yet extracted, and every star is sorted only as
  * far as the MST actually reads it.
  *
- * edges holds the g->m edges of g, each once, as the other Kruskals want
- * them, and GROUPED BY SOURCE: the edges of a star are contiguous (an edge
- * list built by walking the out stars in order, keeping u < v, is). Each
- * run of equal u is a star, sorted in place inside its own slice. Star s
- * owns the slice of frames at the same offset as its edges: its edge count
- * is its bound. NULL on error, directed g, or edges not grouped.
+ * The edges come as a StarEdgeList: grouped by source, so the edges of a
+ * star are contiguous. Each run of equal u is a star, sorted in place
+ * inside its own slice. Star s owns the slice of frames at the same offset
+ * as its edges: its edge count is its bound. NULL on error or directed g.
  */
-GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, StarEdgeList list, int* mst_size)
 {
+    GraphEdge* const edges = list.edges;
+    const size_t     m     = list.count;
+
     if (g == NULL || edges == NULL || mst_size == NULL || g->directed)
     {
         LOG_ERROR("Kruskal needs an undirected graph and non NULL arguments");
@@ -498,33 +535,25 @@ GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* m
 
     size_t            max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
     GraphEdge*        MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
-    quick_sort_frame* frames     = (quick_sort_frame*)malloc(sizeof(quick_sort_frame) * (g->m > 0 ? g->m : 1));
+    quick_sort_frame* frames     = (quick_sort_frame*)malloc(sizeof(quick_sort_frame) * (m > 0 ? m : 1));
     int*              union_find = uf_create(g->n);
     q_step_iter*      heap = dheap_create(g->n, DHEAP_DEFAULT_D, dheap_q_comparer, q_step_iter);
 
     if (MST == NULL || frames == NULL || union_find == NULL || heap == NULL)
     {
-        LOG_ERROR("quick star Kruskal allocation failed (n=%d, m=%zu)", g->n, g->m);
+        LOG_ERROR("quick star Kruskal allocation failed (n=%d, m=%zu)", g->n, m);
         free(MST);
         MST = NULL;
         goto cleanup;
     }
 
-    // INIT: ONE ITERATOR PER RUN OF EQUAL u, ITS LIGHTEST EDGE SETTLED
+    // INIT: ONE ITERATOR PER RUN OF EQUAL u, ITS LIGHTEST EDGE SETTLED. THE LIST
+    // IS GROUPED BY SOURCE (StarEdgeList), SO THERE ARE AT MOST n RUNS: THE HEAP FITS
     int stars = 0;
-    for (size_t start = 0, end; start < g->m; start = end)
+    for (size_t start = 0, end; start < m; start = end)
     {
-        for (end = start + 1; end < g->m && edges[end].u == edges[start].u; end++)
+        for (end = start + 1; end < m && edges[end].u == edges[start].u; end++)
             ;
-
-        // MORE RUNS THAN VERTICES: SOME STAR IS SPLIT, THE EDGES ARE NOT GROUPED
-        if (stars == g->n)
-        {
-            LOG_ERROR("quick star Kruskal: edges not grouped by source");
-            free(MST);
-            MST = NULL;
-            goto cleanup;
-        }
 
         GraphEdge*  star = edges + start;
         q_step_iter q_it = {.id = stars++};
@@ -538,13 +567,14 @@ GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* m
     // EVERY EDGE IS IN ONE STAR ONLY: AT MOST m EXTRACTIONS
     while (*mst_size < g->n - 1 && !dheap_empty(heap))
     {
-        q_step_iter* top = &heap[0];
+        q_step_iter* best = &heap[0]; // the star holding the lightest edge not yet extracted
 
         // A merge happens only if u and v were in different trees: no cycle
-        if (uf_union(union_find, top->cur->u, top->cur->v))
-            MST[(*mst_size)++] = *top->cur;
+        if (uf_union(union_find, best->cur->u, best->cur->v))
+            MST[(*mst_size)++] = *best->cur;
 
-        GraphEdge* next_edge = QUICK_SORT_STEP(&top->sorting, edges);
+        star_filter_top(&best->sorting, union_find);
+        GraphEdge* next_edge = QUICK_SORT_STEP(&best->sorting, (GraphEdge*)best->sorting.edges);
 
         if (next_edge == NULL)
         {
@@ -553,9 +583,9 @@ GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, GraphEdge* edges, int* m
             continue;
         }
 
-        top->cur        = next_edge;
-        top->min_weight = next_edge->w;
-        dheap_update(heap, *top, dheap_q_comparer);
+        best->cur        = next_edge;
+        best->min_weight = next_edge->w;
+        dheap_update(heap, *best, dheap_q_comparer);
     }
 
     LOG_DEBUG("quick star Kruskal: %d edges in the spanning forest", *mst_size);
@@ -569,8 +599,176 @@ cleanup:
     return MST;
 }
 
-GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+// WEIGHTS SAMPLED TO PICK THE THRESHOLD OF A ROUND
+#define FILTER_SAMPLE 1024
+
+static int double_cmp(const void* a, const void* b)
 {
+    double x = *(const double*)a;
+    double y = *(const double*)b;
+
+    return (x > y) - (x < y);
+}
+
+/*
+ * Threshold tau of a round: the weight under which about `target` of the
+ * `alive` edges lie, estimated on a sample of FILTER_SAMPLE random edges.
+ * A wrong estimate costs time, never correctness. HUGE_VAL when the target
+ * covers every alive edge: all of them are light and no sample is needed.
+ */
+static double filter_threshold(const GraphEdge* edges, size_t alive, size_t target, uint64_t* rng)
+{
+    if (target >= alive)
+        return HUGE_VAL;
+
+    double sample[FILTER_SAMPLE];
+    size_t samples = alive < FILTER_SAMPLE ? alive : FILTER_SAMPLE;
+
+    for (size_t i = 0; i < samples; i++)
+    {
+        // XORSHIFT, ALWAYS FROM THE SAME SEED: SAME GRAPH, SAME ROUNDS
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        sample[i] = edges[*rng % alive].w;
+    }
+    qsort(sample, samples, sizeof(double), double_cmp);
+
+    // THE FRACTION target / alive OF THE SAMPLE LIES BELOW THE THRESHOLD
+    return sample[(size_t)((double)target / (double)alive * (double)samples)];
+}
+
+/*
+ * One pass over the first *alive edges of the star list, in order:
+ *   - an edge whose ends already share a tree is dropped: it can never join
+ *     the forest, so it is never sorted;
+ *   - one with w <= tau is copied to light[], to be sorted and read by Kruskal;
+ *   - the others are compacted at the start of edges[], keeping their order,
+ *     so the list stays grouped by source for the next round.
+ * All the edges of a star share u: its root is found once per star, and the
+ * pass costs one find(v) per edge. *alive becomes the number of edges kept;
+ * returns the number of light edges.
+ */
+static size_t filter_pass(GraphEdge* edges, size_t* alive, GraphEdge* light, double tau, int* union_find)
+{
+    size_t kept        = 0;
+    size_t light_count = 0;
+    int    last_u      = -1;
+    int    root_u      = -1;
+
+    for (size_t i = 0; i < *alive; i++)
+    {
+        GraphEdge edge = edges[i];
+
+        if (edge.u != last_u)
+        {
+            last_u = edge.u;
+            root_u = uf_find(union_find, edge.u);
+        }
+
+        // INTERNAL EDGE: u AND v ARE IN THE SAME TREE ALREADY
+        if (uf_find(union_find, edge.v) == root_u)
+        {
+            continue;
+        }
+
+        if (edge.w <= tau)
+        {
+            light[light_count++] = edge;
+        }
+        else
+        {
+            edges[kept++] = edge;
+        }
+    }
+
+    *alive = kept;
+    return light_count;
+}
+
+/*
+ * Filter-Kruskal in rounds on a list grouped by source. Each round picks a
+ * threshold tau that leaves about `target` of the alive edges light, filters
+ * the list (see filter_pass), then runs the usual Kruskal loop on the light
+ * edges only, sorted lazily. The heavy edges are not touched again until the
+ * next round, when the trees built meanwhile let the filter drop most of
+ * them. `target` starts at 2n and doubles every round, so the early rounds
+ * settle the forest on few edges. Every light edge weighs <= tau < every
+ * edge kept, so the edges are consumed in Kruskal order.
+ *
+ * The list is reordered in place. NULL on error or directed g.
+ */
+GraphEdge* graph_mst_filter_star_kruskal(const Graph* g, StarEdgeList list, int* mst_size)
+{
+    GraphEdge* const edges = list.edges;
+    const size_t     m     = list.count;
+
+    if (g == NULL || edges == NULL || mst_size == NULL || g->directed)
+    {
+        LOG_ERROR("Kruskal needs an undirected graph and non NULL arguments");
+        return NULL;
+    }
+
+    *mst_size = 0;
+
+    size_t            max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
+    size_t            capacity   = m > 0 ? m : 1;
+    GraphEdge*        MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
+    GraphEdge*        light      = (GraphEdge*)malloc(sizeof(GraphEdge) * capacity);
+    quick_sort_frame* frames     = (quick_sort_frame*)malloc(sizeof(quick_sort_frame) * capacity);
+    int*              union_find = uf_create(g->n);
+
+    if (MST == NULL || light == NULL || frames == NULL || union_find == NULL)
+    {
+        LOG_ERROR("filter star Kruskal allocation failed (n=%d, m=%zu)", g->n, m);
+        free(MST);
+        MST = NULL;
+        goto cleanup;
+    }
+
+    uint64_t rng    = 88172645463325252ULL;
+    size_t   alive  = m;
+    size_t   target = 2 * (size_t)g->n;
+
+    while (*mst_size < g->n - 1 && alive > 0)
+    {
+        double tau         = filter_threshold(edges, alive, target, &rng);
+        size_t light_count = filter_pass(edges, &alive, light, tau, union_find);
+
+        // THE LIGHT EDGES COME OUT BY WEIGHT, SORTED ONLY AS FAR AS THE FOREST NEEDS
+        quick_sort_iter sorting;
+        if (light_count > 0 && QUICK_SORT_ITER_INIT(&sorting, light, (int)light_count, frames))
+        {
+            GraphEdge* min_edge;
+
+            while (*mst_size < g->n - 1 && (min_edge = QUICK_SORT_STEP(&sorting, light)) != NULL)
+            {
+                // A merge happens only if u and v were in different trees: no cycle
+                if (uf_union(union_find, min_edge->u, min_edge->v))
+                {
+                    MST[(*mst_size)++] = *min_edge;
+                }
+            }
+        }
+
+        target *= 2;
+    }
+
+    LOG_DEBUG("filter star Kruskal: %d edges in the spanning forest", *mst_size);
+
+cleanup:
+    if (union_find != NULL)
+        uf_free(union_find);
+    free(frames);
+    free(light);
+    return MST;
+}
+
+GraphEdge* graph_mst_quick_kruskal(const Graph* g, EdgeList list, int* mst_size)
+{
+    GraphEdge* const edges = list.edges;
+    const size_t     m     = list.count;
+
     if (g == NULL || edges == NULL || mst_size == NULL || g->directed)
     {
         LOG_ERROR("Kruskal needs an undirected graph and non NULL arguments");
@@ -581,7 +779,7 @@ GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_si
 
     size_t            max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
     GraphEdge*        MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
-    quick_sort_frame* frames     = (quick_sort_frame*)malloc(sizeof(quick_sort_frame) * (g->m > 0 ? g->m : 1));
+    quick_sort_frame* frames     = (quick_sort_frame*)malloc(sizeof(quick_sort_frame) * (m > 0 ? m : 1));
     int*              union_find = uf_create(g->n);
     if (MST == NULL || frames == NULL || union_find == NULL)
     {
@@ -597,7 +795,7 @@ GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_si
     quick_sort_iter sorting;
 
     // No edges: nothing to sort, the forest is empty
-    if (g->m > 0 && QUICK_SORT_ITER_INIT(&sorting, edges, (int)g->m, frames))
+    if (m > 0 && QUICK_SORT_ITER_INIT(&sorting, edges, (int)m, frames))
     {
         GraphEdge* min_edge_i;
 
@@ -617,8 +815,11 @@ GraphEdge* graph_mst_quick_kruskal(const Graph* g, GraphEdge* edges, int* mst_si
     return MST;
 }
 
-GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
+GraphEdge* graph_mst_kruskal(const Graph* g, EdgeList list, int* mst_size)
 {
+    GraphEdge* const edges = list.edges;
+    const size_t     m     = list.count;
+
     if (g == NULL || edges == NULL || mst_size == NULL || g->directed)
     {
         LOG_ERROR("Kruskal needs an undirected graph and non NULL arguments");
@@ -641,11 +842,11 @@ GraphEdge* graph_mst_kruskal(const Graph* g, GraphEdge* edges, int* mst_size)
         return NULL;
     }
 
-    QUICK_SORT(edges, (int)g->m, 0, (int)g->m - 1);
+    QUICK_SORT(edges, (int)m, 0, (int)m - 1);
 
     LOG_DEBUG("Ordering edges done with quick sort!");
 
-    for (size_t i = 0; *mst_size < g->n - 1 && i < g->m; i++)
+    for (size_t i = 0; *mst_size < g->n - 1 && i < m; i++)
     {
         // A merge happens only if u and v were in different trees: no cycle
         if (uf_union(union_find, edges[i].u, edges[i].v))

@@ -14,29 +14,6 @@
 #define OUTPUT_DOT "out/bayarea.dot"
 #define EXAMPLE_NODE 7
 
-/* Edge list of the graph, each edge once: every out-arc when directed,
- * only u < v when undirected (both adjacency lists hold the edge), as
- * graph_mst_kruskal wants it. NULL if the allocation fails. */
-static GraphEdge* collect_edges(const Graph* g, size_t* count)
-{
-    GraphEdge* edges = malloc(sizeof(GraphEdge) * (g->m > 0 ? g->m : 1));
-    if (!edges)
-        return NULL;
-
-    *count = 0;
-    for (int u = 0; u < g->n; u++)
-    {
-        GraphIter it;
-        int       v;
-        double    w;
-        graph_iter_out(g, u, &it);
-        while (graph_iter_next(&it, &v, &w))
-            if (g->directed || u < v)
-                edges[(*count)++] = (GraphEdge){u, v, w};
-    }
-    return edges;
-}
-
 static double total_weight(const GraphEdge* edges, int count)
 {
     double sum = 0.0;
@@ -52,16 +29,15 @@ static int test_kruskal_random(void)
     if (!g)
         return 1;
 
-    size_t     m;
-    GraphEdge* edges = collect_edges(g, &m);
-    int        size  = 0;
-    GraphEdge* mst   = edges ? graph_mst_quick_kruskal(g, edges, &size) : NULL;
+    StarEdgeList edges = graph_star_edge_list(g);
+    int          size  = 0;
+    GraphEdge*   mst   = edges.edges ? graph_mst_quick_kruskal(g, star_as_edge_list(edges), &size) : NULL;
 
     double weight = mst ? total_weight(mst, size) : -1.0;
     printf("Kruskal test (CLRS 23.4): %d edges, weight %.0f\n", size, weight);
 
     free(mst);
-    free(edges);
+    free(edges.edges);
     graph_free(g);
     return 0;
 }
@@ -111,10 +87,9 @@ int main(void)
         fprintf(stderr, "import di " INPUT_DOT_UNDIRECTED " fallito\n");
     else
     {
-        size_t     m;
-        GraphEdge* edges = collect_edges(roads_und, &m);
-        int        size  = 0;
-        GraphEdge* mst   = edges ? graph_mst_kruskal(roads_und, edges, &size) : NULL;
+        StarEdgeList edges = graph_star_edge_list(roads_und);
+        int          size  = 0;
+        GraphEdge*   mst   = edges.edges ? graph_mst_kruskal(roads_und, star_as_edge_list(edges), &size) : NULL;
         if (!mst)
             fprintf(stderr, "Kruskal on " INPUT_DOT_UNDIRECTED " failed\n");
         else
@@ -122,7 +97,7 @@ int main(void)
                    "total weight %.0f\n",
                    size, roads_und->n - (int)cc_und->count, total_weight(mst, size));
         free(mst);
-        free(edges);
+        free(edges.edges);
     }
     graph_free(roads_und);
 
