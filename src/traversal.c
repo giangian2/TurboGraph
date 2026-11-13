@@ -602,12 +602,38 @@ cleanup:
 // WEIGHTS SAMPLED TO PICK THE THRESHOLD OF A ROUND
 #define FILTER_SAMPLE 1024
 
-static int double_cmp(const void* a, const void* b)
+/*
+ * Quickselect (Hoare): the k-th smallest of a[0..n-1], expected O(n), no
+ * sorting. Reorders a[]. The pivot is the middle element, so sorted or
+ * reversed input does not degrade it.
+ */
+static double select_kth(double* a, size_t n, size_t k)
 {
-    double x = *(const double*)a;
-    double y = *(const double*)b;
+    size_t lo = 0, hi = n - 1;
 
-    return (x > y) - (x < y);
+    while (lo < hi)
+    {
+        double pivot = a[lo + (hi - lo) / 2];
+        size_t i = lo, j = hi;
+
+        while (i <= j)
+        {
+            while (a[i] < pivot) i++;
+            while (a[j] > pivot) j--;
+            if (i <= j)
+            {
+                double t = a[i]; a[i] = a[j]; a[j] = t;
+                i++;
+                if (j == 0) break;
+                j--;
+            }
+        }
+        // a[lo..j] <= pivot <= a[i..hi]; KEEP ONLY THE SIDE HOLDING k
+        if (k <= j)      hi = j;
+        else if (k >= i) lo = i;
+        else             return a[k];
+    }
+    return a[k];
 }
 
 /*
@@ -632,10 +658,13 @@ static double filter_threshold(const GraphEdge* edges, size_t alive, size_t targ
         *rng ^= *rng << 17;
         sample[i] = edges[*rng % alive].w;
     }
-    qsort(sample, samples, sizeof(double), double_cmp);
 
-    // THE FRACTION target / alive OF THE SAMPLE LIES BELOW THE THRESHOLD
-    return sample[(size_t)((double)target / (double)alive * (double)samples)];
+    // THE FRACTION target / alive OF THE SAMPLE LIES BELOW THE THRESHOLD:
+    // ONLY THAT RANK IS NEEDED, SO SELECT IT INSTEAD OF SORTING THE SAMPLE
+    size_t k = (size_t)((double)target / (double)alive * (double)samples);
+    if (k >= samples)
+        k = samples - 1;
+    return select_kth(sample, samples, k);
 }
 
 /*
