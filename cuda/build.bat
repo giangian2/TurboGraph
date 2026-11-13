@@ -9,6 +9,8 @@ rem on the PATH (MinGW-w64, e.g. WinLibs): a 32 bit one cannot load the 64 bit D
 setlocal
 if not defined ARCH set ARCH=sm_50
 if not defined VCVARS set VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat
+if not defined GCC64 set GCC64=C:\Users\Utente\tools\winlibs\mingw64\bin
+set PATH=%GCC64%;%PATH%
 
 for /f %%m in ('gcc -dumpmachine') do set GCC_TARGET=%%m
 echo %GCC_TARGET% | findstr /b x86_64 >nul || (echo gcc on the PATH is %GCC_TARGET%, a 64 bit one ^(x86_64^) is required & exit /b 1)
