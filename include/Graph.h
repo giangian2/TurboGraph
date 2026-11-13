@@ -73,7 +73,14 @@ typedef struct
 
 static inline EdgeList star_as_edge_list(StarEdgeList list)
 {
+#ifdef __cplusplus /* nvcc reads this header; C++ has no compound literals */
+    EdgeList out;
+    out.edges = list.edges;
+    out.count = list.count;
+    return out;
+#else
     return (EdgeList){list.edges, list.count};
+#endif
 }
 
 /*
