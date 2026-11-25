@@ -1,6 +1,6 @@
 # Minimum spanning forest: Kruskal variants
 
-Four Kruskal variants live in `src/traversal.c`. They take the edges of an
+Six Kruskal variants live in `src/traversal.c`. They take the edges of an
 undirected graph, each once, as one of two types (`include/Graph.h`):
 
 - `EdgeList`: the edges in any order;
@@ -19,6 +19,10 @@ The list is reordered in place, so pass a copy to keep it.
 | `graph_mst_quick_kruskal` | `EdgeList` | lazy quicksort: one edge per step, sorted only as far as the forest reads |
 | `graph_mst_quick_star_kruskal` | `StarEdgeList` | one lazy quicksort per star inside its own slice, merged through a d-ary heap; the range about to be partitioned is filtered first |
 | `graph_mst_filter_star_kruskal` | `StarEdgeList` | Filter-Kruskal in rounds: threshold, one filtering pass, lazy quicksort of the light edges only |
+| `graph_mst_kbest_star_kruskal` | `StarEdgeList` | K lightest edges per star from one read-only scan, 16-byte heap of heads, rescan with filter and compaction when the buffer runs out |
+| `graph_mst_filter_kbest_kruskal` | `StarEdgeList` | Filter-Kruskal rounds whose light edges are read by K-best instead of a global lazy quicksort |
+
+Which one is fastest depends on the family of graph: see "MST suite" below.
 
 All of them sort through `Sorting.h`, a single-header Hoare quicksort over
 any record with a `double w` field. `sizeof(T)` and the offset of `w` reach
@@ -122,7 +126,9 @@ but the heap stays the bottleneck: on 1M vertices `dheap_update` takes about
 
 ## Proposal: K-best scan per star
 
-Not implemented yet. It generalizes idea 2 of the list above, and it
+Implemented as `graph_mst_kbest_star_kruskal`; what it measured is in
+"K-best: what the measurements said" below, and the expectations of this
+section mostly did not hold. It generalizes idea 2 of the list above, and it
 replaces the per-star structure of `graph_mst_quick_star_kruskal`: the lazy
 quicksort of today, or a heap built on the whole star (`dheap_heapify`).
 
@@ -416,6 +422,118 @@ then the wall clock with `cuda/bench_mst.c` on the graphs of the tables
 above. Expected: a large gain on the dense graphs, where stars are long and
 read little, and a small one on sparse graphs, where stars are short and
 the global heap dominates.
+
+## K-best: what the measurements said
+
+The implementation follows the proposal, with fixed K (`KB_K`, default 3,
+`-DKB_K=` to change it):
+
+- one 64-byte block per vertex (`kb_star_t`, `aligned_alloc(64)`):
+  threshold, start, deg, head, len, mode and the K slots in one cache line;
+- a heap of 16-byte heads `{w, u}` built with `dheap_heapify` in O(n);
+- a per-star threshold `(w, v)`, starting at `(-inf, -1)`, so the first
+  scan is not a special case and ties are never lost;
+- a refill that drops the edges extracted or internal, compacts the star
+  and rebuilds the buffer in one pass;
+- `kb_skip_internal`: before the head of a star goes back to the heap, the
+  buffer moves past the edges that became internal. The largest single gain
+  (up to 2.7x on sparse graphs): most buffer entries become internal before
+  they are extracted;
+- the code is split in `kb_alloc`, `kb_load` and `kb_drain`, reused by the
+  hybrid below.
+
+Why it is not the fast path the proposal expected, from counters on a
+complete graph of 4000 vertices (K = 8): the first scan reads 8M edges and
+the rescans another **6.5M**. The K lightest edges of u lead to the vertices
+that join the tree of u first, so for every edge used 2-3 buffer entries
+are thrown away as internal and the buffer runs dry; and with `u < v` the
+long stars (small u) are the ones read most, so the rescans hit the
+longest stars. The heap is not the cost on dense graphs (7k updates); the
+second pass over the edges is.
+
+Tried and dropped: an in place mode (from the first refill, partial
+quicksort with k doubling, `-DKB_INPLACE=1`). Almost every star refills
+once or twice, and a quickselect costs ~2d with writes against the d reads
+of a rescan: never faster.
+
+## MST suite
+
+`bench/mst_suite.c`, run with `make suite` (always `-O2`; `make suite
+SUITE="real 5"` runs only the cases whose name contains `real`, best of 5).
+Every variant is checked against the full-sort Kruskal (forest size and
+weight) on:
+
+| family | what it tests |
+|---|---|
+| `uniform` | G(n, m), uniform weights: the old benchmark, worst case for structure |
+| `sbm` | stochastic block model, uniform weights or light in-block edges |
+| `jsbm` | block model with Jaccard weights: the profile of real social graphs, at 4k - 400k vertices |
+| `powerlaw` | Chung-Lu, hubs and a long tail |
+| `geometric` | random geometric graph, weight = distance (road-like) |
+| `ties` | integer weights 1..100: the `(w, v)` threshold |
+| `edge` | disconnected, isolated vertices, all weights equal, starless vertices |
+| `real` | SNAP graphs and BayAreaUs |
+
+The real graphs come from `tools/fetch_mst_graphs.sh` (~5 minutes, into
+`res/mst/`, ignored by git). They have no weights, so they get the
+**Jaccard distance** of the two neighborhoods (`bench/jaccard.h`): light
+inside a community, 1 on a bridge with nothing shared. Small ones become DOT
+files (`tools/snap_to_dot.py`), large ones a binary edge list
+(`tools/snap_to_bin.c`). bitcoin-otc keeps its real trust ratings.
+
+### What the structure decides
+
+Two measurements explain most of the table:
+
+- **How much of the sorted list Kruskal must read.** On uniform random
+  graphs the last MST edge is light (~n ln n of m edges are read), so the
+  lazy methods (quick, filter) win. On every real graph it is **100%**:
+  communities are joined by heavy bridges, or the graph is disconnected,
+  and laziness saves nothing.
+- **How many of the edges read are useful.** On facebook and email-eu only
+  5-6% of them join the forest: the rest are inside a community, and a
+  per-star filter drops them without sorting them. On sparse graphs
+  (amazon, dblp) 30-36% are useful and stars have 2-3 edges.
+
+Hence, best of 3, ms:
+
+| graph | quick | filter | kbest | hybrid |
+|---|---|---|---|---|
+| gplus-ego (107k, deg 227) | 1667 | 567 | 615 | **527** (437 with K 8, target 8n) |
+| jsbm dense 4k (deg 148) | 23.0 | 12.7 | 11.1 | **8.0** |
+| facebook (4k, deg 44) | 8.2 | 8.0 | 6.0 | **6.0** |
+| artist (50k, deg 32) | 74 | **46** | 76 | 51 |
+| twitter-ego (81k, deg 33) | 144 | **114** | 160 | 126 |
+| jsbm deg 29, 400k | 480 | **326** | 854 | 626 |
+| pokec (1.6M, deg 27) | 2620 | **2387** | 4296 | 3476 |
+| amazon (335k, deg 5.5) | 97 (full sort 82) | 152 | 324 | 291 |
+| uniform 1M, deg 16 | 1397 | **862** | 3193 | 2149 |
+
+- **Dense graphs with communities** (degree >= ~150): the per-star variants
+  are ~3x faster than quick, and the hybrid is the fastest CPU variant.
+- **Degree ~30**: filter wins, and its lead over K-best grows with n (1.7x
+  at 4k vertices, 2.5x at 400k): a heap operation per extraction costs more
+  than a lazy quicksort on a contiguous array. The K-best wins on facebook
+  and email-eu are a small-graph effect (everything in cache).
+- **Large sparse graphs**: the plain full-sort Kruskal is often the
+  fastest. Kruskal reads everything anyway, and every lazy structure is
+  overhead.
+
+## Hybrid: Filter-Kruskal rounds read by K-best
+
+`graph_mst_filter_kbest_kruskal` keeps the rounds of Filter-Kruskal: a
+global threshold tau from a sample, one `filter_pass` that drops the
+internal edges, copies the light ones to a buffer and compacts the heavy
+ones in place. The light buffer comes out of the pass still grouped by
+source, so it is a `StarEdgeList` itself: K-best reads it (`kb_load`,
+heapify, `kb_drain`) instead of a global lazy quicksort. Every light edge
+weighs <= tau < every heavy one, so the rounds consume the edges in Kruskal
+order. `target` starts at `FKB_TARGET * n` (default 2) and doubles.
+
+It pays where the light buffer has long stars, that is high degree: on
+gplus-ego it is 1.33x faster than filter with K = 8 and a target of 8n.
+The target is a trade-off: 8n helps gplus and hurts the degree ~30 graphs
+(jsbm 40k: 55 ms against 39), so the default stays at 2n.
 
 ## Boruvka on the GPU
 
