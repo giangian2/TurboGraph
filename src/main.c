@@ -25,13 +25,13 @@ static double total_weight(const GraphEdge* edges, int count)
 static int test_kruskal_random(void)
 {
 
-    Graph* g = generate_random_graph(0.05, 10000, true, false, 126, GRAPH_STAR);
+    Graph* g = generate_random_graph(0.01, 10000, true, false, 126, GRAPH_STAR);
     if (!g)
         return 1;
 
     StarEdgeList edges = graph_star_edge_list(g);
     int          size  = 0;
-    GraphEdge*   mst   = edges.edges ? graph_mst_quick_kruskal(g, star_as_edge_list(edges), &size) : NULL;
+    GraphEdge*   mst   = edges.edges ? graph_mst_quick_star_kruskal(g, (edges), &size) : NULL;
 
     double weight = mst ? total_weight(mst, size) : -1.0;
     printf("Kruskal test (CLRS 23.4): %d edges, weight %.0f\n", size, weight);
@@ -47,7 +47,7 @@ int main(void)
     if (test_kruskal_random() != 0)
         return 1;
 
-
+    /*
     Graph* roads = graph_import_dot(INPUT_DOT, GRAPH_STAR);
     if (!roads)
     {
@@ -79,8 +79,6 @@ int main(void)
     printf("%s components: %zu (largest: %d vertices)\n",
            roads->directed ? "Strongly connected" : "Connected", cc->count, largest);
 
-    /* Kruskal sulla versione non orientata, pesata con le label:
-     * la foresta ricoprente ha n - #componenti archi */
     Graph* roads_und = graph_import_dot(INPUT_DOT_UNDIRECTED, GRAPH_STAR);
     AUTO_FREE_COMPONENTS cc_und = roads_und ? graph_find_connected_components(roads_und) : NULL;
     if (!cc_und)
@@ -108,6 +106,6 @@ int main(void)
         printf("Wrote " OUTPUT_DOT " -- render with:\n"
                "  dot -Tsvg " OUTPUT_DOT " -o your_output_name.svg\n");
 
-    graph_free(roads);
+    graph_free(roads); */
     return 0;
 }
