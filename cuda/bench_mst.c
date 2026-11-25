@@ -164,7 +164,7 @@ int main(int argc, char** argv)
     printf("n = %d, m = %zu (avg degree %.1f)\n", g->n, m, 2.0 * (double)m / g->n);
 
     int        size = 0;
-    double     t_kruskal, t_quick, t_star, t_filter_star;
+    double     t_kruskal, t_quick, t_star, t_filter_star, t_kbest;
     GraphEdge* mst;
 
     BEST_OF(runs, mst = graph_mst_kruskal(g, RAW_LIST, &size), t_kruskal);
@@ -184,6 +184,11 @@ int main(int argc, char** argv)
 
     BEST_OF(runs, mst = graph_mst_filter_star_kruskal(g, STAR_LIST, &size), t_filter_star);
     printf("filter star kruskal: %9.2f ms  %s\n", t_filter_star,
+           verdict(size, weight_of(mst, size), ref_size, ref_weight));
+    free(mst);
+
+    BEST_OF(runs, mst = graph_mst_kbest_star_kruskal(g, STAR_LIST, &size), t_kbest);
+    printf("kbest star kruskal : %9.2f ms  %s\n", t_kbest,
            verdict(size, weight_of(mst, size), ref_size, ref_weight));
     free(mst);
 
