@@ -235,4 +235,6 @@ QUICK__FORCE_INLINE void* quick__step(quick_sort_iter* it, size_t es, size_t w_o
     return NULL;
 }
 
+
+
 #endif /* GRAPH_SORTING_H */
