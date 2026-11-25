@@ -90,6 +90,7 @@ GraphEdge* graph_mst_quick_kruskal(const Graph* g, EdgeList edges, int* mst_size
 GraphEdge* graph_mst_quick_star_kruskal(const Graph* g, StarEdgeList edges, int* mst_size);
 GraphEdge* graph_mst_kbest_star_kruskal(const Graph* g, StarEdgeList edges, int* mst_size);
 GraphEdge* graph_mst_filter_star_kruskal(const Graph* g, StarEdgeList edges, int* mst_size);
+GraphEdge* graph_mst_filter_kbest_kruskal(const Graph* g, StarEdgeList edges, int* mst_size);
 
 GraphEdge* graph_mst_prim(const Graph* g, GraphEdge* edges, int* mst_size);
 
