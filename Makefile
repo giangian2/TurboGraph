@@ -86,7 +86,27 @@ profile: bin/cgdiff | out
 bin/cgdiff: tools/cgdiff.c | bin
 	$(CC) -std=c11 -Wall -Wextra -O2 $< -o $@
 
+# --- MST suite ------------------------------------------------------------
+# Every CPU Kruskal variant on uniform, block model, power-law, geometric,
+# tied and real graphs, checked against the full-sort Kruskal. Always -O2.
+# The real graphs come from tools/fetch_mst_graphs.sh (skipped if missing).
+#
+#   make suite                       everything
+#   make suite SUITE="sbm 5"         only the cases whose name contains sbm, best of 5
+SUITE ?=
+
+bin/mst_suite: bench/mst_suite.c bench/jaccard.h $(LIB) | bin
+	$(CC) $(CFLAGS) $< -Lbin -lgraph -lm -o $@
+
+# SNAP edge list -> binary graph with Jaccard weights (tools/fetch_mst_graphs.sh)
+bin/snap_to_bin: tools/snap_to_bin.c bench/jaccard.h $(HDR) | bin
+	$(CC) -std=gnu11 -Wall -Wextra -O2 -fopenmp -Iinclude $< -o $@
+
+suite:
+	$(MAKE) --no-print-directory OPT=-O2 bin/mst_suite
+	bin/mst_suite $(SUITE)
+
 clean:
 	rm -rf build bin
 
-.PHONY: all test run clean memcheck profile
+.PHONY: all test run clean memcheck profile suite
