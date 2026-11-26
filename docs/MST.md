@@ -430,7 +430,7 @@ The implementation follows the proposal, with fixed K (`KB_K`, default 3,
 
 - one 64-byte block per vertex (`kb_star_t`, `aligned_alloc(64)`):
   threshold, start, deg, head, len, mode and the K slots in one cache line;
-- a heap of 16-byte heads `{w, u}` built with `dheap_heapify` in O(n);
+- a heap of 16-byte heads `{w, u}`, built in place over the heads in O(n);
 - a per-star threshold `(w, v)`, starting at `(-inf, -1)`, so the first
   scan is not a special case and ties are never lost;
 - a refill that drops the edges extracted or internal, compacts the star
@@ -455,6 +455,54 @@ Tried and dropped: an in place mode (from the first refill, partial
 quicksort with k doubling, `-DKB_INPLACE=1`). Almost every star refills
 once or twice, and a quickselect costs ~2d with writes against the d reads
 of a rescan: never faster.
+
+### Profile and the two fixes that paid
+
+Callgrind (`tools/profile.sh -f graph_mst_kbest_star_kruskal -c -B`) on
+`jsbm/dense-40k` (2.95M edges, deg 148) split K-best into the refills
+(~54% of the instructions, `uf_find` included), the heap (~26%) and the
+first scan (~20%). Filter-Kruskal executes the same number of instructions
+(403M against 405M) and is still ~1.7x faster: its work is sequential
+passes, K-best jumps between stars scattered in memory.
+
+- **A heap that only touches its root.** K-best reads `heap[0]`, then
+  either replaces it with a heavier head (it can only sink) or removes it.
+  `DHeap` pays for what this case never uses: the position map `pos[]`
+  (two random writes per swap), full swaps through a scratch slot and a
+  sift-up attempt on every update. `kb_heap_sink` sinks a hole instead:
+  one 16-byte copy per level, the new head written once, no `pos[]`.
+  The comparator was not the issue: `DHeap` already gets it inlined.
+- **Buffer keys in registers.** The refill compared each edge with the
+  worst slot through `e[b[K-1]].w`: two dependent loads, reloaded every
+  time because the compaction `e[wr] = x` may alias them. `bw[]`/`bv[]`
+  keep the keys of the slots.
+
+Together: 405M -> 336M instructions (-17%), 5-18% faster on every graph
+tried.
+
+### Tried and dropped: a K per star
+
+The rescans read the list 2.5 times, so the idea was to pick for every
+star the K it will need, from its degree, before the first scan. An oracle
+recorded how many edges Kruskal takes from each star: 3-7 on average, and
+with that K a single scan would do. Measured, it did not pay:
+
+- with K = max(6, 2 sqrt(deg)) the reads drop from 2.5 to 1.5-1.8 m, but
+  the time does not move (+-5%): a larger buffer holds edges that become
+  internal while they wait (skips 150k -> 1.24M on dense-40k);
+- with the **perfect** K (an in place run with K = deg records where each
+  star stops, a second run sorts exactly that much) K-best is 1.4-1.6x
+  *slower* than with K = 3 on dense-40k and gplus. The perfect K adds up
+  to **93-100% of m**: to finish a star almost all of its edges must be
+  discarded as internal anyway.
+
+With a small K the internal edges never enter the buffer: the refill drops
+them in bulk, in one sequential pass, without sorting them. A large K sorts
+them first and skips them one by one. What would help is knowing *which*
+edges will still be alive when extracted, and that depends on merges not
+yet made. K = 3 is the right choice, not a compromise; insertion into a
+buffer inside the 64-byte block beats the same buffer in a separate pool by
+~20% (same work, other memory).
 
 ## MST suite
 
@@ -510,7 +558,8 @@ Hence, best of 3, ms:
 | uniform 1M, deg 16 | 1397 | **862** | 3193 | 2149 |
 
 - **Dense graphs with communities** (degree >= ~150): the per-star variants
-  are ~3x faster than quick, and the hybrid is the fastest CPU variant.
+  are ~3x faster than quick. Whether the hybrid beats filter there depends
+  on hubs, see "Large graphs" below.
 - **Degree ~30**: filter wins, and its lead over K-best grows with n (1.7x
   at 4k vertices, 2.5x at 400k): a heap operation per extraction costs more
   than a lazy quicksort on a contiguous array. The K-best wins on facebook
@@ -530,10 +579,104 @@ heapify, `kb_drain`) instead of a global lazy quicksort. Every light edge
 weighs <= tau < every heavy one, so the rounds consume the edges in Kruskal
 order. `target` starts at `FKB_TARGET * n` (default 2) and doubles.
 
-It pays where the light buffer has long stars, that is high degree: on
-gplus-ego it is 1.33x faster than filter with K = 8 and a target of 8n.
 The target is a trade-off: 8n helps gplus and hurts the degree ~30 graphs
-(jsbm 40k: 55 ms against 39), so the default stays at 2n.
+(jsbm 40k: 55 ms against 39), so the default stays at 2n. Where it wins is
+below.
+
+## Large graphs: where the hybrid beats Filter-Kruskal
+
+`bench/mst_big.c` (`make big`) runs filter, hybrid and K-best on graphs of
+10M - 117M edges, read straight into a `StarEdgeList` from the binary
+format (no adjacency structure, so 117M edges fit in 15 GB). `BIGFLAGS` is
+compiled into `src/traversal.c`, so both can run at the same target
+(`FS_TARGET` for filter, `FKB_TARGET` and `KB_K` for the hybrid):
+
+```sh
+tools/fetch_mst_graphs.sh big      # Orkut (117M edges) + 4 large DC-SBM graphs
+tools/gen_mst_grid.sh              # the grid below, res/mst/grid
+make big BIG="grid 5 filter,hybrid"
+make big BIG="grid 5 filter,hybrid" BIGFLAGS="-DFS_TARGET=8 -DFKB_TARGET=8 -DKB_K=8"
+```
+
+### Hubs
+
+A **hub** is a vertex whose degree is far above the average, like a
+celebrity in a social network: most users have a few hundred contacts, a
+few have tens of thousands. The technical name of the property is a
+heavy-tailed (scale-free when it is a power law, P(k) ~ k^-gamma) degree
+distribution; the lower gamma, the stronger the hubs. It is independent of
+**community structure** (groups densely connected inside, sparsely between
+them): community structure is about *who* the neighbors are, hubs about
+*how many* each vertex has. A block model has communities and no hubs,
+Barabasi-Albert has hubs and no communities, real social graphs have both.
+
+In a `StarEdgeList` a hub owns a star of thousands of contiguous edges.
+The bench measures the concentration as the share of the edges held by the
+1% largest stars: ~2% without hubs, 7-20% with them, 22% on gplus.
+
+The generator (`tools/gen_mst_bin.c`) is a degree-corrected stochastic
+block model (Karrer, Newman 2011): blocks of 1000 vertices, 85% of the
+degree inside the block, a power-law weight per vertex for the hubs
+(gamma = 0: none), Jaccard weights. Hubs merge repeated edges, so the real
+degree is below the requested one.
+
+### The grid
+
+n = 300k, best configuration of each (filter at target 2n or 8n; hybrid
+with K 3 / 2n or K 8 / 8n), best of 5, ratios against the other one, real
+average degree in brackets. Identical runs vary by 5-9%, so 1.01-1.04 is a
+tie.
+
+| requested degree | no hubs (2%) | gamma 3.0 (~7%) | gamma 2.5 (~11%) | gamma 2.2 (~18%) |
+|---|---|---|---|---|
+| 100 | filter 1.48x (96) | filter 1.06x (89) | filter 1.07x (75) | filter 1.16x (54) |
+| 180 | filter 1.14x (169) | tie 1.04x (150) | tie 1.01x (125) | **hybrid 1.13x** (89) |
+| 260 | filter 1.08x (237) | **hybrid 1.13x** (207) | **hybrid 1.10x** (170) | tie 1.02x (120) |
+| 340 | filter 1.10x (302) | **hybrid 1.13x** (260) | **hybrid 1.12x** (212) | **hybrid 1.09x** (149) |
+
+Larger and real graphs, same comparison:
+
+| graph | m | degree | top 1% stars | result |
+|---|---|---|---|---|
+| gplus-ego | 12.2M | 227 | 22% | **hybrid 1.42x** |
+| DC-SBM 300k, hubs | 28.3M | 189 | 10% | **hybrid 1.13x** |
+| DC-SBM 300k, no hubs | 40.3M | 269 | 2% | tie |
+| DC-SBM 1M, no hubs | 57.5M - 93M | 115 - 186 | 2% | filter 1.09 - 1.34x |
+| DC-SBM 1M, hubs | 44.4M - 68M | 89 - 136 | 12% | tie - filter 1.11x |
+| Orkut | 117M | 76 | 17% | filter 1.13x |
+| Pokec | 22.3M | 27 | 12% | filter 1.20x |
+
+On gplus the gain is K-best's, not the target's: filter at 8n runs as at
+2n (543 ms against 536), the hybrid drops to 378.
+
+### The rule
+
+**Without hubs Filter-Kruskal wins at every degree** (8-48%, up to deg 300
+and on 1M vertices). **With hubs (>= ~7% of the edges in the 1% largest
+stars) the hybrid wins by 9-13% from a real average degree of ~150**; at
+~90-140 they tie, below ~90 filter wins. gplus (1.4x) is the extreme case:
+22% of the edges in the top 1% stars, E[s^2]/E[s] = 1146.
+
+Why both are needed. The two algorithms run the same rounds and differ only
+on the light edges of a round: filter sorts them all in one contiguous
+array (each light edge moved ~log L times), the hybrid reads each star once
+and drops the edges that became internal in bulk at the next refill,
+without sorting them.
+
+- **High degree** means that most light edges are useless: inside a
+  community every vertex has tens or hundreds of light edges and the tree
+  needs about one (useful edges: 49% at degree 4, 4% at 64, 1% at 256).
+  Filter spends its sort on edges headed for the bin. At low degree almost
+  every edge read is needed, and a quicksort step on a contiguous array is
+  cheaper than a heap operation per extraction.
+- **Hubs** put those useless edges in a few long stars. A hub joins the
+  tree early, then nearly its whole star is internal and one sequential
+  refill drops it. Without hubs every star holds a handful of light edges
+  per round, and its fixed costs (64-byte block, heap entry, a jump in
+  memory) are not paid back.
+
+Use the hybrid (K = 8, target 8n) only when both hold; Filter-Kruskal
+otherwise.
 
 ## Boruvka on the GPU
 
