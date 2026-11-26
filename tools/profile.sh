@@ -46,7 +46,7 @@ FUNC=""
 TOP=15
 SAVE=""
 DIFF=""
-LINES=0
+ANNOTATE=0   # not LINES: bash overwrites it with the terminal height (checkwinsize)
 CALLERS=""
 SIM=()
 
@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
         -d|--diff)   DIFF="$2"; shift 2 ;;
         -c|--cache)  SIM+=(--cache-sim=yes); shift ;;
         -B|--branch) SIM+=(--branch-sim=yes); shift ;;
-        -l|--lines)  LINES=1; shift ;;
+        -l|--lines)  ANNOTATE=1; shift ;;
         -C|--callers) CALLERS="$2"; shift 2 ;;
         -h|--help)   sed -n '2,/^set -euo/p' "$0" | sed 's/^# \?//;$d'; exit 0 ;;
         --)          shift; break ;;
@@ -122,7 +122,7 @@ echo "-- hottest functions ($SHOW) --------------------------------------------"
 callgrind_annotate --threshold=99 --show="$SHOW" "$OUT" 2>/dev/null \
     | sed -n '/file:function/,/^$/p' | sed 's| \[[^]]*\]$||' | head -n "$((TOP + 2))"
 
-if [[ "$LINES" == 1 ]]; then
+if [[ "$ANNOTATE" == 1 ]]; then
     echo
     echo "-- sources annotated line by line --------------------------------------"
     callgrind_annotate --auto=yes "$OUT" 2>/dev/null | sed -n '/Auto-annotated source/,$p'

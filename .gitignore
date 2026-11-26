@@ -25,3 +25,6 @@ perf.data*
 *.swp
 *~
 .DS_Store
+
+# --- MST suite graphs (tools/fetch_mst_graphs.sh rebuilds them) ---------
+/res/mst/

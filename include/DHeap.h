@@ -63,6 +63,11 @@ typedef struct
 // Offset in bytes of id inside T, computed from the pointer (nothing is read)
 #define DHEAP__ID_OFF(h) ((size_t)((char*)&(h)->id - (char*)(h)))
 
+// Copies n elems into a new heap of capacity cap, NULL on error (see dheap__heapify)
+#define dheap_heapify(elems, n, cap, d, cmp)                                                       \
+    (DHEAP__CHECK_ID(__typeof__(*(elems))),                                                        \
+     (__typeof__(*(elems))*)dheap__heapify((elems), (n), (cap), (d), (cmp), sizeof(*(elems)),      \
+                                           DHEAP__ID_OFF(elems)))
 #define dheap_create(cap, d, cmp, T) (DHEAP__CHECK_ID(T), (T*)dheap__create(cap, d, cmp, sizeof(T)))
 #define dheap_free(h) (dheap__free(DHEAP__HDR(h)))
 #define dheap_size(h) (DHEAP__HDR(h)->size)
@@ -304,6 +309,51 @@ static inline int dheap__update(dheap_header_t* h, const void* elem, dheap_cmp c
     }
 
     return DHEAP_OK;
+}
+
+// Builds a heap from n elems in O(n): copy, then sink every internal node bottom-up.
+// NULL if n > cap, out of memory, id out of range or duplicated
+static inline void* dheap__heapify(const void* elems, size_t n, size_t cap, size_t d,
+                                   dheap_cmp cmp, size_t es, size_t id_off)
+{
+    if (n > cap)
+    {
+        return NULL;
+    }
+
+    char* dheap = (char*)dheap__create(cap, d, cmp, es);
+    if (dheap == NULL)
+    {
+        return NULL;
+    }
+
+    dheap_header_t* h   = DHEAP__HDR(dheap);
+    D_HEAP_ID_TYPE* pos = dheap__pos(h);
+
+    memcpy(dheap, elems, n * es);
+    h->size = n;
+
+    for (size_t i = 0; i < n; i++)
+    {
+        D_HEAP_ID_TYPE id = dheap__get_id(dheap + i * es, id_off);
+        if (id < 0 || (size_t)id >= cap || pos[id] != -1)
+        {
+            dheap__free(h);
+            return NULL;
+        }
+        pos[id] = (D_HEAP_ID_TYPE)i;
+    }
+
+    // Last internal node is the parent of n - 1, from there on only leaves
+    if (n > 1)
+    {
+        for (size_t i = (n - 2) / d + 1; i-- > 0;)
+        {
+            dheap__move_down(h, i, cmp, es, id_off);
+        }
+    }
+
+    return dheap;
 }
 
 #endif
