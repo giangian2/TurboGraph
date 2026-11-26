@@ -75,7 +75,7 @@ static size_t jac__common(const int* a, size_t na, const int* b, size_t nb)
 /* Returns a new array of *m_out edges (u < v, no duplicates, sorted by u
  * then v) weighted by the Jaccard distance; NULL if out of memory. The input
  * is not modified. */
-static GraphEdge* jaccard_weights(int n, const GraphEdge* in, size_t m, size_t* m_out)
+__attribute__((unused)) static GraphEdge* jaccard_weights(int n, const GraphEdge* in, size_t m, size_t* m_out)
 {
     // 1. simple graph: each edge once as (min, max) << 32 | max, sorted, unique
     uint64_t* key = malloc(sizeof(uint64_t) * (m ? m : 1));

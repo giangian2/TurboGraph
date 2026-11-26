@@ -106,7 +106,28 @@ suite:
 	$(MAKE) --no-print-directory OPT=-O2 bin/mst_suite
 	bin/mst_suite $(SUITE)
 
+# Large clustered graph generator (DC-SBM, Jaccard weights) for the big bench
+bin/gen_mst_bin: tools/gen_mst_bin.c bench/jaccard.h $(HDR) | bin
+	$(CC) -std=gnu11 -Wall -Wextra -O2 -fopenmp -Iinclude $< -lm -o $@
+
+# --- big MST bench ----------------------------------------------------------
+# Filter-Kruskal, hybrid and K-best on graphs of 10M - 120M edges (see
+# bench/mst_big.c; tools/fetch_mst_graphs.sh big fetches and generates them).
+# BIGFLAGS is compiled into src/traversal.c, so the bench is always relinked:
+#
+#   make big                                              defaults
+#   make big BIG="orkut 5"                                one graph, best of 5
+#   make big BIGFLAGS="-DFS_TARGET=8 -DFKB_TARGET=8 -DKB_K=8"   same target for both
+BIG      ?=
+BIGFLAGS ?=
+
+big:
+	$(MAKE) --no-print-directory OPT=-O2 $(LIB)
+	$(CC) -std=c11 -Wall -Wextra -g -Iinclude -O2 $(BIGFLAGS) -DBIGFLAGS='"$(BIGFLAGS)"' \
+		bench/mst_big.c src/traversal.c $(filter-out build/traversal.o,$(OBJ)) -lm -o bin/mst_big
+	bin/mst_big $(BIG)
+
 clean:
 	rm -rf build bin
 
-.PHONY: all test run clean memcheck profile suite
+.PHONY: all test run clean memcheck profile suite big

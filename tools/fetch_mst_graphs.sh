@@ -15,6 +15,9 @@
 #
 #   tools/fetch_mst_graphs.sh          small and large graphs
 #   tools/fetch_mst_graphs.sh small    small graphs only (no C build)
+#   tools/fetch_mst_graphs.sh big      also the graphs of bench/mst_big.c:
+#                                      Orkut (1.4 GB download, ~2 GB .bin) and
+#                                      four generated DC-SBM graphs (~5 GB)
 set -euo pipefail
 
 RAW=res/mst/raw
@@ -75,4 +78,30 @@ for entry in "${LARGE[@]}"; do
             zcat "$raw" | bin/snap_to_bin "$out"
         fi
     fi
+done
+
+[[ "${1:-}" == big ]] || exit 0
+
+# --- graphs of bench/mst_big.c -------------------------------------------------
+# Orkut: 3M vertices, 117M edges, deg ~76, ground-truth communities. The
+# conversion needs ~6 GB of RAM.
+raw="$RAW/com-orkut.ungraph.txt.gz"
+if [[ ! -s "$raw" ]]; then
+    echo "fetching orkut (Orkut social network: 3M vertices, 117M edges)"
+    curl -fsSL --retry 2 -o "$raw" "$SNAP/bigdata/communities/com-orkut.ungraph.txt.gz"
+fi
+[[ -s "$OUT/orkut.bin" ]] || zcat "$raw" | bin/snap_to_bin "$OUT/orkut.bin"
+
+# Generated: degree-corrected block models, blocks of 1000 vertices, with and
+# without hubs. name | n | block | deg_in | deg_out | gamma (0 = no hubs)
+make --no-print-directory bin/gen_mst_bin
+SYNTH=(
+    "big-c1m-d120|1000000|1000|100|20|0"
+    "big-c1m-d120-hub|1000000|1000|100|20|2.5"
+    "big-c300k-d300|300000|1000|260|40|0"
+    "big-c300k-d300-hub|300000|1000|260|40|2.5"
+)
+for entry in "${SYNTH[@]}"; do
+    IFS='|' read -r name n block din dout gamma <<<"$entry"
+    [[ -s "$OUT/$name.bin" ]] || bin/gen_mst_bin "$OUT/$name.bin" "$n" "$block" "$din" "$dout" "$gamma"
 done
