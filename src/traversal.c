@@ -1045,12 +1045,21 @@ static size_t filter_pass(GraphEdge* edges, size_t* alive, GraphEdge* light, dou
 }
 
 /*
+ * Starting size of the light part of a Filter-Kruskal round, in multiples
+ * of n: doubled at every round. Overridable to compare it with the hybrid at
+ * the same target (bench/mst_big.c)
+ */
+#ifndef FS_TARGET
+#define FS_TARGET 2
+#endif
+
+/*
  * Filter-Kruskal in rounds on a list grouped by source. Each round picks a
  * threshold tau that leaves about `target` of the alive edges light, filters
  * the list (see filter_pass), then runs the usual Kruskal loop on the light
  * edges only, sorted lazily. The heavy edges are not touched again until the
  * next round, when the trees built meanwhile let the filter drop most of
- * them. `target` starts at 2n and doubles every round, so the early rounds
+ * them. `target` starts at FS_TARGET * n and doubles every round, so the early rounds
  * settle the forest on few edges. Every light edge weighs <= tau < every
  * edge kept, so the edges are consumed in Kruskal order.
  *
@@ -1086,7 +1095,7 @@ GraphEdge* graph_mst_filter_star_kruskal(const Graph* g, StarEdgeList list, int*
 
     uint64_t rng    = 88172645463325252ULL;
     size_t   alive  = m;
-    size_t   target = 2 * (size_t)g->n;
+    size_t   target = (size_t)FS_TARGET * (size_t)g->n;
 
     while (*mst_size < g->n - 1 && alive > 0)
     {
