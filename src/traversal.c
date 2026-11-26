@@ -7,6 +7,7 @@
 #include "../include/DHeap.h"
 #include "internal.h"
 #include "star.h"
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -568,12 +569,42 @@ typedef struct
     int    id; /* the vertex u of the star */
 } kb_top_t;
 
-/* Heap order: the lighter head first */
-static int kb_cmp(const void* a, const void* b)
+/*
+ * Heap of the star heads, 4-ary, lighter head first. K-best only ever touches
+ * the root (the new head of the extracted star is heavier, so it can only
+ * sink; an exhausted star leaves from the root), so DHeap's position map and
+ * its sift-up attempt are pure overhead: this heap has neither. x sinks as a
+ * hole from i: each level moves one child up, x is written once at the end.
+ */
+#define KB_HEAP_D 4
+
+static inline __attribute__((always_inline)) void kb_heap_sink(kb_top_t* h, size_t n, size_t i,
+                                                               kb_top_t x)
 {
-    const kb_top_t* x = a;
-    const kb_top_t* y = b;
-    return (x->w > y->w) - (x->w < y->w);
+    for (;;)
+    {
+        size_t first = KB_HEAP_D * i + 1;
+        if (first >= n)
+            break;
+        size_t last = first + KB_HEAP_D < n ? first + KB_HEAP_D : n;
+        size_t best = first;
+        for (size_t c = first + 1; c < last; c++)
+            if (h[c].w < h[best].w)
+                best = c;
+        if (h[best].w >= x.w)
+            break;
+        h[i] = h[best];
+        i    = best;
+    }
+    h[i] = x;
+}
+
+/* Heap order on h[0 .. n) in place, O(n) */
+static void kb_heapify(kb_top_t* h, size_t n)
+{
+    if (n > 1)
+        for (size_t i = (n - 2) / KB_HEAP_D + 1; i-- > 0;)
+            kb_heap_sink(h, n, i, h[i]);
 }
 
 static inline __attribute__((always_inline)) int kb_less(double aw, int av, double bw, int bv)
@@ -596,6 +627,13 @@ static inline __attribute__((always_inline)) int kb_refill(kb_star_t* st, GraphE
     int        root = first ? -1 : uf_find(uf, e[0].u); /* deg >= 1 here, see below */
     int        wr = 0, len = 0;
 
+    /* keys of the buffer slots, kept in sync with b: comparing through e[b[j]]
+     * costs two dependent loads, and e[wr] = x forces a reload every time */
+    double bw[KB_K];
+    int    bv[KB_K];
+    bw[KB_K - 1] = INFINITY; /* worst slot of an empty buffer: everything enters */
+    bv[KB_K - 1] = INT_MAX;
+
     for (int i = 0; i < st->deg; i++)
     {
         const GraphEdge x = e[i];
@@ -611,15 +649,19 @@ static inline __attribute__((always_inline)) int kb_refill(kb_star_t* st, GraphE
         else
             wr = i; /* first scan: no writes, positions stay */
 
-        if (len < KB_K || kb_less(x.w, x.v, e[b[KB_K - 1]].w, e[b[KB_K - 1]].v))
+        if (len < KB_K || kb_less(x.w, x.v, bw[KB_K - 1], bv[KB_K - 1]))
         {
             int j = len < KB_K ? len++ : KB_K - 1; /* full: overwrite the worst */
-            while (j > 0 && kb_less(x.w, x.v, e[b[j - 1]].w, e[b[j - 1]].v))
+            while (j > 0 && kb_less(x.w, x.v, bw[j - 1], bv[j - 1]))
             {
-                b[j] = b[j - 1];
+                b[j]  = b[j - 1];
+                bw[j] = bw[j - 1];
+                bv[j] = bv[j - 1];
                 j--;
             }
-            b[j] = wr;
+            b[j]  = wr;
+            bw[j] = x.w;
+            bv[j] = x.v;
         }
         wr++;
     }
@@ -738,10 +780,10 @@ static int kb_load(kb_star_t* kb, StarEdgeList list, int* uf, kb_top_t* init)
  * yet extracted, until the heap is empty or the forest has n - 1 edges. The
  * accepted edges are appended to MST[*mst_size ...].
  */
-static void kb_drain(kb_star_t* kb, kb_top_t* heap, GraphEdge* edges, int* union_find, int n,
-                     GraphEdge* MST, int* mst_size)
+static void kb_drain(kb_star_t* kb, kb_top_t* heap, size_t size, GraphEdge* edges, int* union_find,
+                     int n, GraphEdge* MST, int* mst_size)
 {
-    while (*mst_size < n - 1 && !dheap_empty(heap))
+    while (*mst_size < n - 1 && size > 0)
     {
         const int       u  = heap[0].id; // the star holding the lightest edge not yet extracted
         kb_star_t*      st = &kb[u];
@@ -762,14 +804,15 @@ static void kb_drain(kb_star_t* kb, kb_top_t* heap, GraphEdge* edges, int* union
             (KB_INPLACE ? kb_refill_inplace(st, edges, union_find)
                         : kb_refill(st, edges, union_find, false)) == 0)
         {
-            kb_top_t exhausted;
-            (void)dheap_pop(heap, &exhausted, kb_cmp);
+            // the star leaves: the last leaf takes the root and sinks
+            size--;
+            if (size > 0)
+                kb_heap_sink(heap, size, 0, heap[size]);
             continue;
         }
 
         // The new head is heavier than the old one: it can only sink
-        kb_top_t next = {.w = edges[st->start + kb_head_pos(st)].w, .id = u};
-        (void)dheap_update(heap, next, kb_cmp);
+        kb_heap_sink(heap, size, 0, (kb_top_t){.w = edges[st->start + kb_head_pos(st)].w, .id = u});
     }
 }
 
@@ -795,20 +838,11 @@ GraphEdge* graph_mst_kbest_star_kruskal(const Graph* g, StarEdgeList list, int* 
 
     size_t     max_edges  = g->n > 1 ? (size_t)(g->n - 1) : 1;
     GraphEdge* MST        = (GraphEdge*)malloc(sizeof(GraphEdge) * max_edges);
-    kb_top_t*  init       = (kb_top_t*)malloc(sizeof(kb_top_t) * (size_t)(g->n > 0 ? g->n : 1));
+    kb_top_t*  heap       = (kb_top_t*)malloc(sizeof(kb_top_t) * (size_t)(g->n > 0 ? g->n : 1));
     int*       union_find = uf_create(g->n);
     kb_star_t* kb         = kb_alloc(g->n);
-    kb_top_t*  heap       = NULL;
 
-    if (MST != NULL && init != NULL && union_find != NULL && kb != NULL)
-    {
-        int tops = kb_load(kb, list, union_find, init);
-        // cap n: the id of a head is its vertex u
-        heap = dheap_heapify(init, (size_t)tops, (size_t)g->n, DHEAP_DEFAULT_D, kb_cmp);
-    }
-    free(init);
-
-    if (heap == NULL)
+    if (MST == NULL || heap == NULL || union_find == NULL || kb == NULL)
     {
         LOG_ERROR("K-best star Kruskal allocation failed (n=%d, m=%zu)", g->n, list.count);
         free(MST);
@@ -816,16 +850,18 @@ GraphEdge* graph_mst_kbest_star_kruskal(const Graph* g, StarEdgeList list, int* 
         goto cleanup;
     }
 
-    kb_drain(kb, heap, edges, union_find, g->n, MST, mst_size);
+    // the heads are built in place into a heap: no copy, no position map
+    size_t tops = (size_t)kb_load(kb, list, union_find, heap);
+    kb_heapify(heap, tops);
+    kb_drain(kb, heap, tops, edges, union_find, g->n, MST, mst_size);
 
     LOG_DEBUG("K-best star Kruskal: %d edges in the spanning forest", *mst_size);
 
 cleanup:
-    if (heap != NULL)
-        dheap_free(heap);
     if (union_find != NULL)
         uf_free(union_find);
     free(kb);
+    free(heap);
     return MST;
 }
 
@@ -1147,17 +1183,9 @@ GraphEdge* graph_mst_filter_kbest_kruskal(const Graph* g, StarEdgeList list, int
         // THE LIGHT EDGES ARE STILL GROUPED BY SOURCE: K-BEST READS THEM AS STARS
         if (light_count > 0)
         {
-            int       tops = kb_load(kb, (StarEdgeList){light, light_count}, union_find, init);
-            kb_top_t* heap = dheap_heapify(init, (size_t)tops, (size_t)g->n, DHEAP_DEFAULT_D, kb_cmp);
-            if (heap == NULL)
-            {
-                LOG_ERROR("filter K-best Kruskal: heap allocation failed (n=%d)", g->n);
-                free(MST);
-                MST = NULL;
-                goto cleanup;
-            }
-            kb_drain(kb, heap, light, union_find, g->n, MST, mst_size);
-            dheap_free(heap);
+            size_t tops = (size_t)kb_load(kb, (StarEdgeList){light, light_count}, union_find, init);
+            kb_heapify(init, tops);
+            kb_drain(kb, init, tops, light, union_find, g->n, MST, mst_size);
         }
 
         target *= 2;
