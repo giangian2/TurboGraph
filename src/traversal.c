@@ -809,6 +809,18 @@ static kbest_star* kb_alloc(int n)
     return (kbest_star*)aligned_alloc(64, bytes);
 }
 
+/* Opens the star of u on edges[start .. start + deg): nothing extracted yet */
+KB_FORCE_INLINE kbest_star* kb_open(kbest_star* stars, int u, size_t start, size_t deg)
+{
+    kbest_star* star = &stars[u];
+
+    star->start  = (int)start;
+    star->deg    = (int)deg;
+    star->last_w = -INFINITY; // NOTHING EXTRACTED YET: BELOW EVERY (w, v)
+    star->last_v = -1;
+    return star;
+}
+
 /*
  * Loads the stars of list into their blocks, stars[u] = star of u, with
  * nothing extracted yet, and runs their first scan. The head of each star
@@ -828,11 +840,7 @@ static int kb_load(kbest_star* stars, StarEdgeList list, kbest_head* heads)
         for (end = start + 1; end < m && edges[end].u == u; end++)
             ;
 
-        kbest_star* star = &stars[u];
-        star->start      = (int)start;
-        star->deg        = (int)(end - start);
-        star->last_w     = -INFINITY; // NOTHING EXTRACTED YET: BELOW EVERY (w, v)
-        star->last_v     = -1;
+        kbest_star* star = kb_open(stars, u, start, end - start);
 
         // A RUN IS NEVER EMPTY: THE BUFFER GETS AT LEAST ONE EDGE
         kb_scan_first(star, edges);
@@ -1153,6 +1161,79 @@ static size_t filter_pass(GraphEdge* edges, size_t* alive, GraphEdge* light, dou
 }
 
 /*
+ * filter_pass for the hybrid, with the first K-best scan of every star
+ * folded in: each light edge is offered to the buffer of its star while it
+ * is copied to light[], so kb_load does not read the light edges again.
+ * When the source changes, the star just closed is stored and its head goes
+ * to heads[]. Same drops and same compaction as filter_pass.
+ *
+ * *alive becomes the number of edges kept; returns the number of stars with
+ * light edges (their heads are in heads[0 ..)).
+ */
+static size_t filter_pass_kbest(GraphEdge* edges, size_t* alive, GraphEdge* light, double tau,
+                                int* union_find, kbest_star* stars, kbest_head* heads)
+{
+    size_t       kept        = 0;
+    size_t       light_count = 0;
+    size_t       star_start  = 0; // first light edge of the current star
+    size_t       count       = 0;
+    int          current_u   = -1;
+    int          root_u      = -1;
+    kbest_buffer buffer;
+
+    buffer.len = 0;
+    for (size_t i = 0; i < *alive; i++)
+    {
+        GraphEdge edge = edges[i];
+
+        // A NEW STAR STARTS: CLOSE THE PREVIOUS ONE, find(u) ONCE FOR ALL ITS EDGES
+        if (edge.u != current_u)
+        {
+            if (buffer.len > 0)
+            {
+                kbest_star* star = kb_open(stars, current_u, star_start, light_count - star_start);
+                kb_store(star, &buffer);
+                heads[count++] = (kbest_head){.w = buffer.w[0], .u = current_u};
+            }
+
+            current_u  = edge.u;
+            root_u     = uf_find(union_find, edge.u);
+            star_start = light_count;
+            buffer.len = 0;
+        }
+
+        // INTERNAL EDGE: u AND v ARE IN THE SAME TREE ALREADY
+        if (uf_find(union_find, edge.v) == root_u)
+        {
+            continue;
+        }
+
+        if (edge.w <= tau)
+        {
+            // POSITION INSIDE THE STAR, AS kb_scan_first WOULD GIVE IT
+            kb_buffer_offer(&buffer, (int)(light_count - star_start), edge.w, edge.v);
+            light[light_count++] = edge;
+        }
+        else
+        {
+            // COMPACT: kept <= i, SO NOTHING UNREAD IS OVERWRITTEN
+            edges[kept++] = edge;
+        }
+    }
+
+    // THE LAST STAR HAS NO SUCCESSOR TO CLOSE IT
+    if (buffer.len > 0)
+    {
+        kbest_star* star = kb_open(stars, current_u, star_start, light_count - star_start);
+        kb_store(star, &buffer);
+        heads[count++] = (kbest_head){.w = buffer.w[0], .u = current_u};
+    }
+
+    *alive = kept;
+    return count;
+}
+
+/*
  * Starting size of the light part of a Filter-Kruskal round, in multiples
  * of n: doubled at every round. Overridable to compare it with the hybrid at
  * the same target (bench/mst_big.c)
@@ -1247,7 +1328,8 @@ cleanup:
 #define FKB_TARGET 2
 #endif
 
-/*
+/**
+
  * Hybrid of Filter-Kruskal and K-best. The rounds are those of
  * graph_mst_filter_star_kruskal: a global threshold tau from a sample, one
  * filter_pass that drops the internal edges, moves the light ones (w <= tau)
@@ -1259,6 +1341,9 @@ cleanup:
  * and doubles every round.
  *
  * The list is reordered in place. NULL on error or directed g.
+ * 
+ * @author Gianluca Bianchi
+ * @version 0.1.17
  */
 GraphEdge* graph_mst_filter_kbest_kruskal(const Graph* g, StarEdgeList list, int* mst_size)
 {
@@ -1294,13 +1379,14 @@ GraphEdge* graph_mst_filter_kbest_kruskal(const Graph* g, StarEdgeList list, int
 
     while (*mst_size < g->n - 1 && alive > 0)
     {
-        double tau         = filter_threshold(edges, alive, target, &rng);
-        size_t light_count = filter_pass(edges, &alive, light, tau, union_find);
+        double tau = filter_threshold(edges, alive, target, &rng);
 
-        // THE LIGHT EDGES ARE STILL GROUPED BY SOURCE: K-BEST READS THEM AS STARS
-        if (light_count > 0)
+        // THE LIGHT EDGES ARE STILL GROUPED BY SOURCE: K-BEST READS THEM AS STARS,
+        // LOADED BY THE FILTER PASS ITSELF
+        size_t tops = filter_pass_kbest(edges, &alive, light, tau, union_find, stars, init);
+
+        if (tops > 0)
         {
-            size_t tops = (size_t)kb_load(stars, (StarEdgeList){light, light_count}, init);
             kb_heapify(init, tops);
             kb_drain(stars, init, tops, light, union_find, g->n, MST, mst_size);
         }
