@@ -36,7 +36,7 @@ gcc on the PATH, e.g. WinLibs; a 32 bit MinGW cannot load a 64 bit DLL):
 
 If the library is missing, the benchmark still prints the CPU numbers.
 
-On Windows run `cudabuild.bat` from `cmd` or PowerShell: Git Bash mangles
+On Windows run `cuda\build.bat` from `cmd` or PowerShell: Git Bash mangles
 the path.
 
 ## How the algorithm works
