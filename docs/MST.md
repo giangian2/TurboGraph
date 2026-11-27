@@ -576,8 +576,13 @@ Hence, best of 3, ms:
 global threshold tau from a sample, one `filter_pass` that drops the
 internal edges, copies the light ones to a buffer and compacts the heavy
 ones in place. The light buffer comes out of the pass still grouped by
-source, so it is a `StarEdgeList` itself: K-best reads it (`kb_load`,
-heapify, `kb_drain`) instead of a global lazy quicksort. Every light edge
+source, so it is a `StarEdgeList` itself: K-best reads it (heapify,
+`kb_drain`) instead of a global lazy quicksort. The pass is
+`filter_pass_kbest`, a `filter_pass` that also does the first K-best scan:
+each light edge is offered to the buffer of its star while it is copied to
+the light buffer, and when the source changes the star just closed gets its
+block and its head goes to the heap. `kb_load` would read every light edge
+a second time (3% on wiki-topcats and indochina, a tie on hollywood). Every light edge
 weighs <= tau < every heavy one, so the rounds consume the edges in Kruskal
 order. `target` starts at `FKB_TARGET * n` (default 2) and doubles.
 
@@ -743,11 +748,104 @@ without sorting them.
   cheaper than a heap operation per extraction.
 - **Hubs** put those useless edges in a few long stars. How long is what
   counts (the rule above): the fixed costs of a star are paid once per
-  refill, the edges it drops in bulk grow with its size. A hub joins the
-  tree early, then nearly its whole star is internal and one sequential
-  refill drops it. Without hubs every star holds a handful of light edges
-  per round, and its fixed costs (64-byte block, heap entry, a jump in
-  memory) are not paid back.
+  refill, the edges it drops in bulk grow with its size. Without hubs every
+  star holds a handful of light edges per round, and its fixed costs
+  (64-byte block, heap entry, a jump in memory) are not paid back.
+
+### Why the hubs: where the internal edges are dropped
+
+Both algorithms drop, in `filter_pass`, the edges already internal when a
+round starts. They differ on the edges that **become** internal during the
+round, as the trees merge. A union of the trees A and B makes internal
+every edge between A and B, and those edges sit in the stars of many
+vertices, not only in the star of the edge just extracted. Neither
+algorithm looks for them at once (it would mean scanning many stars per
+extraction); they differ on when and how they find them.
+
+- **Filter-Kruskal** finds an internal light edge only when the lazy
+  quicksort hands it out as the next minimum and `uf_union` rejects it.
+  The light buffer is one mixed array, so by then the edge has been
+  compared and moved by ~log L partitions.
+- **The hybrid** looks at the edges of a star only when the star needs
+  them, and lazily. `kb_skip_internal` drops the internal heads of the
+  buffer of the star just extracted (at most K edges, one find each, no
+  heap operation); when the buffer runs out, `kb_refill` reads the rest of
+  the star once and drops every edge that became internal meanwhile, one
+  find each, never sorted, never in the heap. The later the refill, the
+  more unions have happened and the more it drops in one pass. What the
+  hybrid does not avoid: the head of another star may become internal
+  while it waits in the heap; it rises, is extracted and rejected as in
+  filter, but that is one edge per star, and the refill that follows
+  cleans the rest of that star.
+
+So per light edge filter pays ~log L partition steps, useful or not; the
+hybrid pays a fixed cost per star (block, heap entry, one sink per
+extraction, the refill bookkeeping) and one find per edge it drops. It
+wins when the stars are long **and** become internal in bulk before they
+are needed. That depends on who the neighbors of a hub are:
+
+```
+ A: neighbors linked among themselves     B: neighbors that are leaves
+
+       a ─── b                                  a   b
+       │ ╲ ╱ │                                   ╲ ╱
+       │  H  │                                    H
+       │ ╱ ╲ │                                   ╱ ╲
+       c ─── d                                  c   d
+```
+
+- **A** (a film cast, the pages of one site): after `H-a`, the edges
+  `a-b`, `b-d`, `a-c` from *other* stars bring b, c and d into the tree of
+  H without using the edges of H. At the refill of H, `H-b`, `H-c`, `H-d`
+  are internal: one pass drops them and the star is empty.
+  The order of the extractions does not matter. With the Jaccard weights
+  the edges of a hub tend to be heavy (a hub shares few neighbors with any
+  one of them), so the edges among the neighbors usually come first:
+
+  ```
+  a-b, b-d, a-c   (stars of a, b)   {a, b, c, d}, H still alone
+  H-a             (star of H)       {H, a, b, c, d}: the one useful edge of H
+  skip_internal:  H-b, H-c internal, one find each
+  refill:         H-d internal, dropped
+  ```
+
+  If instead the edges of H are the lighter ones, `H-a`, `H-b`, `H-c`,
+  `H-d` are all useful, and what becomes internal is `a-b`, `b-d`, `a-c`,
+  in the stars of a and b, where their own skip and refill drop them.
+
+  The rule: a group of k vertices linked among themselves holds up to
+  ~k^2 / 2 edges and the tree uses k - 1 of them. All the others become
+  internal **whatever the order**; the order only decides in which stars
+  they end up, the hub's or its neighbors'. The hybrid drops them in bulk
+  in whichever star holds them, one find each; filter sorts every one of
+  them first.
+- **B** (pages that link a popular page and little else): the only edge
+  that can bring c into the tree of H is `H-c`, so it never becomes
+  internal before it is extracted. Every refill reads the whole star, keeps
+  K edges and drops nothing; Kruskal uses those K and the star is read
+  again. A star of s edges is read ~s / K times, ~s^2 / (2K) reads against
+  the s of a single pass. There is no group here, so nothing to drop: every
+  `H-x` is the only link of x, useful whatever the order.
+
+Counters on the refills of the stars of at least 1024 edges (hybrid at its
+defaults, K = 3):
+
+| graph | edges read by those refills | kept (not internal) | case |
+|---|---|---|---|
+| indochina | 47.0M | 16.0M, **34%** | A: two thirds dropped in bulk |
+| hollywood | 1.20M | 0.83M, 69% | mostly A |
+| wiki-topcats | 1.88M | 1.81M, **96%** | B: the refills drop almost nothing |
+
+Case B is real but weighs little on wiki-topcats: those refills read 1.9M
+edges out of the 11.5M read by all refills, and sorting such a star once
+instead of refilling it (tried: a star of >= 1024 edges keeping > 3/4 of
+them through a refill is sorted and read in order) changed nothing beyond
+noise, and slowed K-best down by 10% on indochina, whose long stars empty
+by themselves. A larger K for long stars would remove fewer of those reads
+than sorting does, so it was not tried. What makes wiki-topcats lose is
+the other side of the rule: 1.72M stars loaded for 6.4M light edges, 3.7
+per star per round, a refill every 3 edges, fixed costs per star that are
+never paid back.
 
 Use the hybrid when the 1% largest stars hold ~800 edges or more on
 average; Filter-Kruskal otherwise. Its best configuration is K = 8 /
