@@ -16,8 +16,10 @@
 #   tools/fetch_mst_graphs.sh          small and large graphs
 #   tools/fetch_mst_graphs.sh small    small graphs only (no C build)
 #   tools/fetch_mst_graphs.sh big      also the graphs of bench/mst_big.c:
-#                                      Orkut (1.4 GB download, ~2 GB .bin) and
-#                                      four generated DC-SBM graphs (~5 GB)
+#                                      Orkut (1.4 GB download, ~2 GB .bin),
+#                                      Hollywood and Indochina (0.6 GB download,
+#                                      ~3.3 GB .bin) and four generated DC-SBM
+#                                      graphs (~5 GB)
 set -euo pipefail
 
 RAW=res/mst/raw
@@ -58,6 +60,7 @@ LARGE=(
     "youtube|$SNAP/bigdata/communities/com-youtube.ungraph.txt.gz||YouTube: 1.1M vertices, sparse, control case"
     "pokec|$SNAP/soc-pokec-relationships.txt.gz||Pokec social network: 1.6M vertices, deg ~28"
     "gplus-ego|$SNAP/gplus_combined.txt.gz||Google+ ego networks: 107k vertices, dense communities, deg ~230"
+    "wiki-topcats|$SNAP/wiki-topcats.txt.gz||Wikipedia links: 1.8M vertices, deg ~28, hubs up to deg 238k"
 )
 
 make --no-print-directory bin/snap_to_bin
@@ -91,6 +94,24 @@ if [[ ! -s "$raw" ]]; then
     curl -fsSL --retry 2 -o "$raw" "$SNAP/bigdata/communities/com-orkut.ungraph.txt.gz"
 fi
 [[ -s "$OUT/orkut.bin" ]] || zcat "$raw" | bin/snap_to_bin "$OUT/orkut.bin"
+
+# Hub-dominated graphs from the LAW collection, as Matrix Market on SuiteSparse:
+# the % comments and the size line "rows cols nnz" are dropped, the rest is
+# an edge list. Indochina needs ~8 GB of RAM to convert.
+# name | url | file inside the archive | what it is
+HUBS=(
+    "hollywood|https://sparse.tamu.edu/MM/LAW/hollywood-2009.tar.gz|hollywood-2009/hollywood-2009.mtx|actor collaborations: 1.1M vertices, 56M edges, deg ~99"
+    "indochina|https://sparse.tamu.edu/MM/LAW/indochina-2004.tar.gz|indochina-2004/indochina-2004.mtx|web crawl: 7.4M vertices, 151M edges, hubs up to deg 256k"
+)
+for entry in "${HUBS[@]}"; do
+    IFS='|' read -r name url inner what <<<"$entry"
+    raw="$RAW/$(basename "$url")"
+    if [[ ! -s "$raw" ]]; then
+        echo "fetching $name ($what)"
+        curl -fsSL --retry 2 -o "$raw" "$url"
+    fi
+    [[ -s "$OUT/$name.bin" ]] || tar -xzOf "$raw" "$inner" | grep -v '^%' | tail -n +2 | bin/snap_to_bin "$OUT/$name.bin"
+done
 
 # Generated: degree-corrected block models, blocks of 1000 vertices, with and
 # without hubs. name | n | block | deg_in | deg_out | gamma (0 = no hubs)
