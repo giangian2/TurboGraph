@@ -115,6 +115,33 @@ Graph* graph_from_edges(int n, bool directed, const GraphEdge* edges, size_t m, 
     return g;
 }
 
+StarEdgeList graph_star_edge_list(const Graph* g)
+{
+    StarEdgeList list = {NULL, 0};
+    if (g == NULL)
+        return list;
+
+    GraphEdge* edges = malloc(sizeof(GraphEdge) * (g->m > 0 ? g->m : 1));
+    if (edges == NULL)
+        return list;
+
+    size_t count = 0;
+    for (int u = 0; u < g->n; u++)
+    {
+        GraphIter it;
+        int       v;
+        double    w;
+        graph_iter_out(g, u, &it);
+        while (graph_iter_next(&it, &v, &w))
+            if (g->directed || u < v)
+                edges[count++] = (GraphEdge){u, v, w};
+    }
+
+    list.edges = edges;
+    list.count = count;
+    return list;
+}
+
 void graph_free(Graph* g)
 {
     if (!g)

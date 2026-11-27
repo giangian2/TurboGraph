@@ -149,7 +149,13 @@ still change.
   `Components` block.
 - **Minimum spanning forest:** Kruskal with union-find, in three variants:
   full sort, lazy quicksort, and lazy quicksort per star merged through a
-  heap. See [docs/MST.md](docs/MST.md) for measurements and next steps.
+  heap, plus Filter-Kruskal. See [docs/MST.md](docs/MST.md) for
+  measurements and next steps.
+- **GPU (optional, `cuda/`):** a CUDA Boruvka minimum spanning forest,
+  loaded at run time by its benchmark, and the start of a second GPU
+  version (`boruvka_v1.cu`, still a stub) that reduces the graph chunk by
+  chunk in shared memory. Its design is in [cuda/V1.md](cuda/V1.md). See
+  [cuda/README.md](cuda/README.md).
 - **Edge sorting** (`Sorting.h`), a single header generic over any record
   with a `double w` field, all based on Hoare partition:
   - iterative quicksort on an explicit stack;
@@ -271,6 +277,7 @@ src/         library sources, private headers and the demo:
                *_impl.c     the three representations
                traversal.c  BFS, DFS, components, Kruskal
                main.c       demo, not part of the library
+cuda/        optional CUDA add-on: GPU Boruvka, its benchmark, the V1 prototype
 tools/       profile.sh, cgdiff.c
 res/         sample graphs (Bay Area roads, Europe roads, Twitch)
 out/         generated output: DOT exports, callgrind profiles (git-ignored)

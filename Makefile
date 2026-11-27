@@ -86,7 +86,48 @@ profile: bin/cgdiff | out
 bin/cgdiff: tools/cgdiff.c | bin
 	$(CC) -std=c11 -Wall -Wextra -O2 $< -o $@
 
+# --- MST suite ------------------------------------------------------------
+# Every CPU Kruskal variant on uniform, block model, power-law, geometric,
+# tied and real graphs, checked against the full-sort Kruskal. Always -O2.
+# The real graphs come from tools/fetch_mst_graphs.sh (skipped if missing).
+#
+#   make suite                       everything
+#   make suite SUITE="sbm 5"         only the cases whose name contains sbm, best of 5
+SUITE ?=
+
+bin/mst_suite: bench/mst_suite.c bench/jaccard.h $(LIB) | bin
+	$(CC) $(CFLAGS) $< -Lbin -lgraph -lm -o $@
+
+# SNAP edge list -> binary graph with Jaccard weights (tools/fetch_mst_graphs.sh)
+bin/snap_to_bin: tools/snap_to_bin.c bench/jaccard.h $(HDR) | bin
+	$(CC) -std=gnu11 -Wall -Wextra -O2 -fopenmp -Iinclude $< -o $@
+
+suite:
+	$(MAKE) --no-print-directory OPT=-O2 bin/mst_suite
+	bin/mst_suite $(SUITE)
+
+# Large clustered graph generator (DC-SBM, Jaccard weights) for the big bench
+bin/gen_mst_bin: tools/gen_mst_bin.c bench/jaccard.h $(HDR) | bin
+	$(CC) -std=gnu11 -Wall -Wextra -O2 -fopenmp -Iinclude $< -lm -o $@
+
+# --- big MST bench ----------------------------------------------------------
+# Filter-Kruskal, hybrid and K-best on graphs of 10M - 120M edges (see
+# bench/mst_big.c; tools/fetch_mst_graphs.sh big fetches and generates them).
+# BIGFLAGS is compiled into src/traversal.c, so the bench is always relinked:
+#
+#   make big                                              defaults
+#   make big BIG="orkut 5"                                one graph, best of 5
+#   make big BIGFLAGS="-DFS_TARGET=8 -DFKB_TARGET=8 -DKB_K=8"   same target for both
+BIG      ?=
+BIGFLAGS ?=
+
+big:
+	$(MAKE) --no-print-directory OPT=-O2 $(LIB)
+	$(CC) -std=c11 -Wall -Wextra -g -Iinclude -O2 $(BIGFLAGS) -DBIGFLAGS='"$(BIGFLAGS)"' \
+		bench/mst_big.c src/traversal.c $(filter-out build/traversal.o,$(OBJ)) -lm -o bin/mst_big
+	bin/mst_big $(BIG)
+
 clean:
 	rm -rf build bin
 
-.PHONY: all test run clean memcheck profile
+.PHONY: all test run clean memcheck profile suite big
