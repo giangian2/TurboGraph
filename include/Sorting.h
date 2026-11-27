@@ -65,6 +65,12 @@ typedef struct
 #define QUICK_SORT_PARTIAL(a, count, p, q, k)                                                      \
     (QUICK__CHECK_W(a),                                                                            \
      quick__partial_sort((a), sizeof(*(a)), QUICK__W_OFF(a), (count), (p), (q), (k)))
+/* Quickselect: reorders edges[p..q] so that slot k (absolute) holds the
+ * element it would hold if sorted, and returns a pointer to it, NULL on a
+ * bad range */
+#define QUICK_SELECT(a, count, p, q, k)                                                            \
+    (QUICK__CHECK_W(a),                                                                            \
+     (__typeof__(&(a)[0]))quick__select((a), sizeof(*(a)), QUICK__W_OFF(a), (count), (p), (q), (k)))
 /* Lazy sort over a[0..count-1], frames must hold at least count slots */
 #define QUICK_SORT_ITER_INIT(it, a, count, frames)                                                 \
     (QUICK__CHECK_W(a), quick__iter_init((it), (a), (count), (frames)))
@@ -182,6 +188,34 @@ QUICK__FORCE_INLINE void quick__sort(void* a, size_t es, size_t w_off, int count
 {
     // A full sort is a partial one that settles every slot up to q
     quick__partial_sort(a, es, w_off, count, p, q, q + 1);
+}
+
+/* Quickselect on top of quick__partition: after a split at j every element
+ * of [p, j] is <= every element of [j+1, q], so only the side holding k
+ * needs further work. Expected O(q - p), no stack, nothing allocated. */
+QUICK__FORCE_INLINE void* quick__select(void* a, size_t es, size_t w_off, int count, int p, int q,
+                                        int k)
+{
+    if (k < p || k > q)
+    {
+        LOG_ERROR("rank out of range (p=%d, q=%d, k=%d)", p, q, k);
+        return NULL;
+    }
+
+    while (p < q)
+    {
+        int split = quick__partition(a, es, w_off, count, p, q);
+
+        if (split < 0)
+            return NULL;
+
+        if (k <= split)
+            q = split;
+        else
+            p = split + 1;
+    }
+
+    return (char*)a + (size_t)k * es;
 }
 
 QUICK__FORCE_INLINE bool quick__iter_init(quick_sort_iter* it, void* a, int count,

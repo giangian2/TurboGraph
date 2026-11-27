@@ -428,11 +428,12 @@ the global heap dominates.
 The implementation follows the proposal, with fixed K (`KB_K`, default 3,
 `-DKB_K=` to change it):
 
-- one 64-byte block per vertex (`kb_star_t`, `aligned_alloc(64)`):
-  threshold, start, deg, head, len, mode and the K slots in one cache line;
+- one 64-byte block per vertex (`kbest_star`, `aligned_alloc(64)`):
+  last edge extracted, start, deg, next, ready and the K slots in one
+  cache line;
 - a heap of 16-byte heads `{w, u}`, built in place over the heads in O(n);
-- a per-star threshold `(w, v)`, starting at `(-inf, -1)`, so the first
-  scan is not a special case and ties are never lost;
+- a per-star threshold `(w, v)`, the last edge extracted from the star,
+  starting at `(-inf, -1)`, so ties are never lost;
 - a refill that drops the edges extracted or internal, compacts the star
   and rebuilds the buffer in one pass;
 - `kb_skip_internal`: before the head of a star goes back to the heap, the
@@ -452,9 +453,9 @@ longest stars. The heap is not the cost on dense graphs (7k updates); the
 second pass over the edges is.
 
 Tried and dropped: an in place mode (from the first refill, partial
-quicksort with k doubling, `-DKB_INPLACE=1`). Almost every star refills
-once or twice, and a quickselect costs ~2d with writes against the d reads
-of a rescan: never faster.
+quicksort with k doubling, once `-DKB_INPLACE=1`, removed since). Almost
+every star refills once or twice, and a quickselect costs ~2d with writes
+against the d reads of a rescan: never faster.
 
 ### Profile and the two fixes that paid
 
@@ -474,8 +475,9 @@ passes, K-best jumps between stars scattered in memory.
   The comparator was not the issue: `DHeap` already gets it inlined.
 - **Buffer keys in registers.** The refill compared each edge with the
   worst slot through `e[b[K-1]].w`: two dependent loads, reloaded every
-  time because the compaction `e[wr] = x` may alias them. `bw[]`/`bv[]`
-  keep the keys of the slots.
+  time because the compaction `e[wr] = x` may alias them. The scan keeps
+  the keys of the slots next to their positions (`kbest_buffer`), local
+  to the scan: only the positions are stored in the star.
 
 Together: 405M -> 336M instructions (-17%), 5-18% faster on every graph
 tried.
@@ -585,14 +587,15 @@ below.
 
 ## Large graphs: where the hybrid beats Filter-Kruskal
 
-`bench/mst_big.c` (`make big`) runs filter, hybrid and K-best on graphs of
-10M - 117M edges, read straight into a `StarEdgeList` from the binary
-format (no adjacency structure, so 117M edges fit in 15 GB). `BIGFLAGS` is
+`bench/mst_big.c` (`make big`) runs every CPU variant (filter, hybrid,
+K-best, quick star, lazy quicksort, full sort) on graphs of 10M - 151M
+edges, read straight into a `StarEdgeList` from the binary format (no
+adjacency structure, so 151M edges fit in 15 GB). `BIGFLAGS` is
 compiled into `src/traversal.c`, so both can run at the same target
 (`FS_TARGET` for filter, `FKB_TARGET` and `KB_K` for the hybrid):
 
 ```sh
-tools/fetch_mst_graphs.sh big      # Orkut (117M edges) + 4 large DC-SBM graphs
+tools/fetch_mst_graphs.sh big      # Orkut, Hollywood, Indochina + 4 large DC-SBM graphs
 tools/gen_mst_grid.sh              # the grid below, res/mst/grid
 make big BIG="grid 5 filter,hybrid"
 make big BIG="grid 5 filter,hybrid" BIGFLAGS="-DFS_TARGET=8 -DFKB_TARGET=8 -DKB_K=8"
@@ -649,13 +652,82 @@ Larger and real graphs, same comparison:
 On gplus the gain is K-best's, not the target's: filter at 8n runs as at
 2n (543 ms against 536), the hybrid drops to 378.
 
+### Real graphs with large hubs
+
+Three graphs picked for their hubs (`make big BIG=hub/`): Wikipedia links
+(SNAP `wiki-topcats`), actor collaborations and a web crawl (LAW
+`hollywood-2009` and `indochina-2004`, from SuiteSparse). Every CPU
+variant at its defaults (target 2n, K 3), best of 3, ms:
+
+| graph | m | degree | max degree | top 1% stars | filter | hybrid | K-best | quick star | lazy quick | full sort |
+|---|---|---|---|---|---|---|---|---|---|---|
+| wiki-topcats | 25.4M | 28 | 238k | 29.7% | **1779** | 2626 | 3777 | 5585 | 3287 | 2935 |
+| hollywood | 56.4M | 99 | 11k | 20.7% | 5627 | **4373** | 4876 | 7206 | 7386 | 6784 |
+| indochina | 151.0M | 41 | 256k | 45.5% | 18023 | **9821** | 10161 | 15727 | 14631 | 13160 |
+
+Best configuration of each, as in the grid (filter at 8n: 3819, 7112,
+19429 ms; hybrid at K 8 / 8n: 3231, 4655, 9576 ms):
+
+- **indochina: hybrid 1.88x** (9576 against 18023). Filter-Kruskal is the
+  slowest of all six there, slower than a full sort;
+- **hollywood: hybrid 1.29x**, and K-best alone is second;
+- **wiki-topcats: filter 1.48x**. At the same target 8n the hybrid wins
+  1.18x, but only because filter slows down there.
+
+Indochina (degree 41) wins by the largest margin measured so far, far
+below the degree ~150 the grid suggested; wiki-topcats loses with 30% of
+its edges in the top 1% stars. Neither the degree nor the share decides.
+
 ### The rule
 
-**Without hubs Filter-Kruskal wins at every degree** (8-48%, up to deg 300
-and on 1M vertices). **With hubs (>= ~7% of the edges in the 1% largest
-stars) the hybrid wins by 9-13% from a real average degree of ~150**; at
-~90-140 they tie, below ~90 filter wins. gplus (1.4x) is the extreme case:
-22% of the edges in the top 1% stars, E[s^2]/E[s] = 1146.
+The variable that decides is the **mean size of the 1% largest stars**
+(printed by `make big` as "mean size"): how many edges a typical hub hands
+to the refills. Every graph measured, sorted by it (best configuration of
+each; identical runs vary by 5-9%, so 1.01-1.04 is a tie):
+
+| graph | degree | top 1% stars | **mean size of the top 1%** | result |
+|---|---|---|---|---|
+| grid d100, no hubs | 96 | 2.2% | 109 | filter 1.48x |
+| DC-SBM 1M, no hubs (two) | 115 - 186 | 2.1 - 2.2% | 128 - 201 | filter 1.09 - 1.34x |
+| grid d180, no hubs | 169 | 2.2% | 184 | filter 1.14x |
+| Pokec | 27 | 11.5% | 223 | filter 1.20x |
+| grid d260, no hubs | 237 | 2.1% | 253 | filter 1.08x |
+| DC-SBM 300k, no hubs | 269 | 2.1% | 284 | tie |
+| grid d340, no hubs | 302 | 2.1% | 317 | filter 1.10x |
+| grid d100, gamma 3.0 | 89 | 8.3% | 372 | filter 1.06x |
+| **wiki-topcats** | 28 | 29.7% | 468 | **filter 1.48x** |
+| grid d100, gamma 2.5 | 75 | 13.0% | 498 | filter 1.07x |
+| grid d180, gamma 3.0 | 150 | 7.4% | 562 | tie 1.04x |
+| DC-SBM 1M, hubs (two) | 89 - 136 | 11.6 - 12.8% | 578 - 799 | tie - filter 1.11x |
+| grid d100, gamma 2.2 | 54 | 20.7% | 585 | filter 1.16x |
+| grid d260, gamma 3.0 | 207 | 6.8% | 712 | hybrid 1.13x |
+| Orkut | 76 | 16.7% | 719 | filter 1.13x |
+| grid d180, gamma 2.5 | 125 | 11.6% | 733 | tie 1.01x |
+| grid d340, gamma 3.0 | 260 | 6.5% | 841 | hybrid 1.13x |
+| grid d180, gamma 2.2 | 89 | 18.8% | 851 | hybrid 1.13x |
+| grid d260, gamma 2.5 | 170 | 10.9% | 932 | hybrid 1.10x |
+| DC-SBM 300k, hubs | 189 | 10.3% | 981 | hybrid 1.13x |
+| grid d260, gamma 2.2 | 120 | 18.0% | 1097 | tie 1.02x |
+| **hollywood** | 99 | 20.7% | 1102 | **hybrid 1.29x** |
+| grid d340, gamma 2.5 | 212 | 10.4% | 1106 | hybrid 1.12x |
+| **indochina** | 41 | 45.5% | 1157 | **hybrid 1.88x** |
+| grid d340, gamma 2.2 | 149 | 17.4% | 1312 | hybrid 1.09x |
+| gplus-ego | 227 | 22.1% | 2699 | hybrid 1.42x |
+
+**Below ~600 edges Filter-Kruskal wins or ties, above ~800 the hybrid
+wins or ties, on every graph**; 700 - 800 is a grey zone (712 hybrid, 719
+filter). The earlier rule, "hubs (>= ~7% in the top 1% stars) and a real
+degree >= ~150", was a proxy for it: the mean size of the top stars grows
+with both the share and the degree (it is about share x degree x 50), so
+the rule held on the grid, where both move together, and breaks on the
+real graphs, where they do not. Indochina has degree 41 but its top stars
+hold 1157 edges each; wiki-topcats concentrates its hubs in a few huge
+stars (the largest has 202k edges) while the rest of its top 1% is short,
+468 on average. E[s^2]/E[s] does not decide either: 2936 on wiki-topcats,
+the highest of all, and it loses.
+
+The size of the top stars is an O(m) count on a `StarEdgeList`, so the
+choice can be made before running either.
 
 Why both are needed. The two algorithms run the same rounds and differ only
 on the light edges of a round: filter sorts them all in one contiguous
@@ -669,14 +741,18 @@ without sorting them.
   Filter spends its sort on edges headed for the bin. At low degree almost
   every edge read is needed, and a quicksort step on a contiguous array is
   cheaper than a heap operation per extraction.
-- **Hubs** put those useless edges in a few long stars. A hub joins the
+- **Hubs** put those useless edges in a few long stars. How long is what
+  counts (the rule above): the fixed costs of a star are paid once per
+  refill, the edges it drops in bulk grow with its size. A hub joins the
   tree early, then nearly its whole star is internal and one sequential
   refill drops it. Without hubs every star holds a handful of light edges
   per round, and its fixed costs (64-byte block, heap entry, a jump in
   memory) are not paid back.
 
-Use the hybrid (K = 8, target 8n) only when both hold; Filter-Kruskal
-otherwise.
+Use the hybrid when the 1% largest stars hold ~800 edges or more on
+average; Filter-Kruskal otherwise. Its best configuration is K = 8 /
+target 8n on most of the grid, K = 3 / 2n on hollywood (4373 against
+4655).
 
 ## Boruvka on the GPU
 

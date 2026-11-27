@@ -1,5 +1,7 @@
 /*
- * Filter-Kruskal against its K-best variants on large clustered graphs.
+ * Filter-Kruskal against its K-best variants, and the other CPU variants
+ * (lazy star quicksort, lazy quicksort, full sort), on large clustered and
+ * hub-dominated graphs.
  *
  *   make big                                   every graph found, best of 3
  *   make big BIG="orkut 5"                     only the names containing orkut, best of 5
@@ -49,9 +51,22 @@ static const struct
     {"real/gplus-ego", "res/mst/gplus-ego.bin", "Google+ ego networks"},
     {"real/pokec", "res/mst/pokec.bin", "Pokec social network"},
     {"real/orkut", "res/mst/orkut.bin", "Orkut social network"},
+    {"hub/wiki-topcats", "res/mst/wiki-topcats.bin", "Wikipedia links, hubs up to deg 238k"},
+    {"hub/hollywood", "res/mst/hollywood.bin", "actor collaborations, deg ~99, 20k hubs"},
+    {"hub/indochina", "res/mst/indochina.bin", "web crawl, hubs up to deg 256k"},
 };
 
 typedef GraphEdge* (*mst_fn)(const Graph*, StarEdgeList, int*);
+
+/* The variants on a plain EdgeList: a StarEdgeList is one */
+static GraphEdge* run_quick(const Graph* g, StarEdgeList l, int* s)
+{
+    return graph_mst_quick_kruskal(g, star_as_edge_list(l), s);
+}
+static GraphEdge* run_kruskal(const Graph* g, StarEdgeList l, int* s)
+{
+    return graph_mst_kruskal(g, star_as_edge_list(l), s);
+}
 
 static const struct
 {
@@ -61,6 +76,9 @@ static const struct
     {"filter", graph_mst_filter_star_kruskal},
     {"hybrid", graph_mst_filter_kbest_kruskal},
     {"kbest", graph_mst_kbest_star_kruskal},
+    {"q-star", graph_mst_quick_star_kruskal},
+    {"quick", run_quick},
+    {"kruskal", run_kruskal},
 };
 enum
 {
@@ -81,7 +99,8 @@ static int cmp_int_desc(const void* a, const void* b)
 }
 
 /* Shape of the stars, the quantities that decide between filter and hybrid:
- * the largest star, the share of edges in the 1% largest stars and
+ * the largest star, the share of edges in the 1% largest stars, their mean
+ * size (the one that predicts the winner, see docs/MST.md) and
  * E[s^2] / E[s], the size of the star an edge picked at random sits in */
 static void star_stats(const GraphEdge* e, size_t m, int n, double* top_share, double* es2)
 {
@@ -101,9 +120,10 @@ static void star_stats(const GraphEdge* e, size_t m, int n, double* top_share, d
     size_t top = 0;
     for (int i = 0; i < stars / 100; i++)
         top += (size_t)size[i];
-    printf("  stars %d, largest %d, max degree %d, top 1%% of stars hold %.1f%% of the edges, "
-           "E[s^2]/E[s] %.0f\n",
-           stars, size[0], max_deg, 100.0 * (double)top / (double)m, s2 / (double)m);
+    printf("  stars %d, largest %d, max degree %d, top 1%% of stars hold %.1f%% of the edges "
+           "(mean size %.0f), E[s^2]/E[s] %.0f\n",
+           stars, size[0], max_deg, 100.0 * (double)top / (double)m,
+           stars >= 100 ? (double)top / (double)(stars / 100) : 0.0, s2 / (double)m);
     *top_share = 100.0 * (double)top / (double)m;
     *es2       = s2 / (double)m;
     free(size), free(deg);
