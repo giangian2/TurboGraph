@@ -9,6 +9,9 @@ benchmark that compares it with the Kruskal variants of `src/traversal.c`.
 | `boruvka.cu` | the algorithm. Exports `boruvka_gpu()` with a plain C ABI |
 | `bench_mst.c` | benchmark, plain C: builds the graph, runs the CPU variants, loads the GPU library at run time and checks that every result has the same forest size and weight |
 | `build.sh` / `build.bat` | Linux / Windows build of the library and the benchmark |
+| `boruvka_v1.cu` | V1, work in progress: exact MST by hierarchical reduction in shared memory. `boruvka_gpu()` is still a stub that returns `NULL` |
+| `test_v1.c` / `build_test.bat` | smoke test of V1 on a random graph, and its Windows build (`binench_test.exe`) |
+| `V1.md` | design notes for V1 (in Italian): cycle property, shared memory budget, the two intra-block variants, plan for the paper |
 
 The GPU side takes an array of edges in any order (`GraphEdge`: `int u, v;
 double w`, what the `EdgeList` of the CPU variants holds) and returns the indices of the forest edges. It knows
@@ -33,7 +36,7 @@ gcc on the PATH, e.g. WinLibs; a 32 bit MinGW cannot load a 64 bit DLL):
 
 If the library is missing, the benchmark still prints the CPU numbers.
 
-On Windows run `cudauild.bat` from `cmd` or PowerShell: Git Bash mangles
+On Windows run `cudabuild.bat` from `cmd` or PowerShell: Git Bash mangles
 the path.
 
 ## How the algorithm works

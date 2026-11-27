@@ -28,3 +28,6 @@ perf.data*
 
 # --- MST suite graphs (tools/fetch_mst_graphs.sh rebuilds them) ---------
 /res/mst/
+
+# --- large generated exports at the root (321 MB, over the GitHub limit) ---
+/twitch_bfs.dot
